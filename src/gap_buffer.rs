@@ -75,8 +75,12 @@ impl GapBuffer {
             let move_count = self.gap_start - text_pos;
 
             // Move characters from before gap to after gap
+            // When moving left, destination is to the right of source, so copy right-to-left
+            // to avoid overwriting data we haven't read yet
             for i in (0..move_count).rev() {
-                self.buffer[self.gap_end - 1 - i] = self.buffer[self.gap_start - 1 - i];
+                let src = text_pos + i;
+                let dst = self.gap_end - move_count + i;
+                self.buffer[dst] = self.buffer[src];
             }
 
             self.gap_end -= move_count;
@@ -255,19 +259,22 @@ impl TextBuffer for GapBuffer {
         }
     }
 
+    // todo: impl get_line properly
     fn get_line(&self, line_idx: usize) -> Option<&str> {
-        // This is inefficient but works for now
-        // In a real implementation, we'd cache line information
-        let lines = self.to_lines();
-        lines.get(line_idx).map(|s| {
-            // This is a hack - we're returning a reference to a temporary
-            // In practice, we'd need a different approach here
-            unsafe { std::mem::transmute(s.as_str()) }
-        })
+        // Since we can't easily return a stable reference to a line
+        // from a gap buffer without complex caching, we return None.
+        // The editor should use all_lines() instead for now.
+        // TODO: Implement proper line caching if needed for performance
+        None
     }
 
     fn all_lines(&self) -> Vec<String> {
         self.to_lines()
+    }
+
+    fn line_len(&self, line_idx: usize) -> usize {
+        let lines = self.all_lines();
+        lines.get(line_idx).map(|s| s.len()).unwrap_or(0)
     }
 
     fn insert_at(&mut self, row: usize, col: usize, text: &str) {
@@ -291,59 +298,574 @@ impl TextBuffer for GapBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::text_buffer::TextBuffer;
 
     #[test]
-    fn test_insert_and_delete() {
-        let mut buffer = GapBuffer::new();
-
-        // Insert some text
-        buffer.insert(0, "Hello");
-        assert_eq!(buffer.to_string(), "Hello");
-
-        // Insert in the middle
-        buffer.insert(2, "XX");
-        assert_eq!(buffer.to_string(), "HeXXllo");
-
-        // Delete backward
-        buffer.move_gap_to(4);
-        buffer.delete_backward();
-        assert_eq!(buffer.to_string(), "HeXllo");
-
-        // Delete forward
-        buffer.move_gap_to(2);
-        buffer.delete_forward();
-        assert_eq!(buffer.to_string(), "Hello");
+    fn test_new_empty_buffer() {
+        let buffer = GapBuffer::new();
+        assert_eq!(buffer.len(), 0);
+        assert_eq!(buffer.to_string(), "");
+        assert_eq!(buffer.line_count(), 1);
+        assert_eq!(buffer.all_lines(), vec![""]);
     }
 
     #[test]
-    fn test_cursor_conversion() {
+    fn test_from_text() {
+        let buffer = GapBuffer::from_text("Hello, World!");
+        assert_eq!(buffer.to_string(), "Hello, World!");
+        assert_eq!(buffer.len(), 13);
+        assert_eq!(buffer.line_count(), 1);
+
+        let buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+        assert_eq!(buffer.to_string(), "Line 1\nLine 2\nLine 3");
+        assert_eq!(buffer.line_count(), 3);
+    }
+
+    #[test]
+    fn test_from_lines() {
+        let lines = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+            "Third line".to_string(),
+        ];
+        let buffer = GapBuffer::from_lines(lines);
+        assert_eq!(buffer.to_string(), "First line\nSecond line\nThird line");
+        assert_eq!(buffer.line_count(), 3);
+    }
+
+    #[test]
+    fn test_insert_char() {
+        let mut buffer = GapBuffer::new();
+
+        buffer.insert_char('H');
+        assert_eq!(buffer.to_string(), "H");
+
+        buffer.insert_char('i');
+        assert_eq!(buffer.to_string(), "Hi");
+
+        // Move gap and insert
+        buffer.move_gap_to(1);
+        buffer.insert_char('e');
+        assert_eq!(buffer.to_string(), "Hei");
+    }
+
+    #[test]
+    fn test_insert_text_various_positions() {
+        let mut buffer = GapBuffer::new();
+
+        // Insert at beginning (empty buffer)
+        buffer.insert(0, "Hello");
+        assert_eq!(buffer.to_string(), "Hello");
+
+        // Insert at end
+        buffer.insert(5, " World");
+        assert_eq!(buffer.to_string(), "Hello World");
+
+        // Insert in middle
+        buffer.insert(5, " Beautiful");
+        assert_eq!(buffer.to_string(), "Hello Beautiful World");
+
+        // Insert at beginning
+        buffer.insert(0, "Say: ");
+        assert_eq!(buffer.to_string(), "Say: Hello Beautiful World");
+    }
+
+    #[test]
+    fn test_insert_multiline() {
+        let mut buffer = GapBuffer::new();
+
+        buffer.insert(0, "Line 1\nLine 2\nLine 3");
+        assert_eq!(buffer.to_string(), "Line 1\nLine 2\nLine 3");
+        assert_eq!(buffer.line_count(), 3);
+
+        // Insert in middle of line 2
+        buffer.insert(11, " inserted");
+        assert_eq!(buffer.to_string(), "Line 1\nLine inserted 2\nLine 3");
+
+        // Insert newline
+        buffer.insert(6, "\nNew Line");
+        assert_eq!(
+            buffer.to_string(),
+            "Line 1\nNew Line\nLine inserted 2\nLine 3"
+        );
+        assert_eq!(buffer.line_count(), 4);
+    }
+
+    #[test]
+    fn test_delete_backward() {
+        let mut buffer = GapBuffer::from_text("Hello World");
+
+        // Delete from end
+        buffer.move_gap_to(11);
+        buffer.delete_backward();
+        assert_eq!(buffer.to_string(), "Hello Worl");
+
+        // Delete from middle
+        buffer.move_gap_to(6);
+        buffer.delete_backward();
+        assert_eq!(buffer.to_string(), "HelloWorl");
+
+        // Delete from beginning (should do nothing)
+        buffer.move_gap_to(0);
+        buffer.delete_backward();
+        assert_eq!(buffer.to_string(), "HelloWorl");
+    }
+
+    #[test]
+    fn test_delete_forward() {
+        let mut buffer = GapBuffer::from_text("Hello World");
+
+        // Delete from beginning
+        buffer.move_gap_to(0);
+        buffer.delete_forward();
+        assert_eq!(buffer.to_string(), "ello World");
+
+        // Delete from middle
+        buffer.move_gap_to(4);
+        buffer.delete_forward();
+        assert_eq!(buffer.to_string(), "elloWorld");
+
+        // Delete from end (should do nothing)
+        buffer.move_gap_to(9);
+        buffer.delete_forward();
+        assert_eq!(buffer.to_string(), "elloWorld");
+    }
+
+    #[test]
+    fn test_delete_range() {
+        let mut buffer = GapBuffer::from_text("Hello Beautiful World");
+
+        // Delete word in middle
+        buffer.delete_range(6, 16);
+        assert_eq!(buffer.to_string(), "Hello World");
+
+        // Delete from beginning
+        buffer.delete_range(0, 6);
+        assert_eq!(buffer.to_string(), "World");
+
+        // Delete to end
+        buffer.delete_range(3, 5);
+        assert_eq!(buffer.to_string(), "Wor");
+
+        // Delete all
+        buffer.delete_range(0, 3);
+        assert_eq!(buffer.to_string(), "");
+    }
+
+    #[test]
+    fn test_delete_range_edge_cases() {
+        let mut buffer = GapBuffer::from_text("Test");
+
+        // Delete with inverted range (should do nothing)
+        buffer.delete_range(3, 1);
+        assert_eq!(buffer.to_string(), "Test");
+
+        // Delete beyond bounds
+        buffer.delete_range(2, 100);
+        assert_eq!(buffer.to_string(), "Te");
+
+        // Delete from beyond bounds
+        buffer.delete_range(50, 100);
+        assert_eq!(buffer.to_string(), "Te");
+    }
+
+    #[test]
+    fn test_move_gap_to() {
+        let mut buffer = GapBuffer::from_text("ABCDEF");
+
+        // Test gap movement doesn't affect content
+        for i in 0..=6 {
+            buffer.move_gap_to(i);
+            assert_eq!(buffer.to_string(), "ABCDEF", "Gap at position {}", i);
+        }
+
+        // Test inserting after moving gap
+        buffer.move_gap_to(3);
+        buffer.insert_char('X');
+        assert_eq!(buffer.to_string(), "ABCXDEF");
+    }
+
+    #[test]
+    fn test_gap_movement_with_operations() {
+        let mut buffer = GapBuffer::from_text("123456789");
+
+        // Move gap back and forth with operations
+        buffer.move_gap_to(9);
+        buffer.insert_char('A');
+        assert_eq!(buffer.to_string(), "123456789A");
+
+        buffer.move_gap_to(0);
+        buffer.insert_char('B');
+        assert_eq!(buffer.to_string(), "B123456789A");
+
+        buffer.move_gap_to(5);
+        buffer.insert_char('C');
+        assert_eq!(buffer.to_string(), "B1234C56789A");
+
+        buffer.move_gap_to(7);
+        buffer.delete_backward();
+        assert_eq!(buffer.to_string(), "B1234C6789A");
+    }
+
+    #[test]
+    fn test_cursor_to_position() {
         let buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
 
-        // Test cursor to position
+        // First line
         assert_eq!(buffer.cursor_to_position(0, 0), 0);
-        assert_eq!(buffer.cursor_to_position(0, 4), 4);
-        assert_eq!(buffer.cursor_to_position(1, 0), 7);
-        assert_eq!(buffer.cursor_to_position(2, 2), 16);
+        assert_eq!(buffer.cursor_to_position(0, 3), 3);
+        assert_eq!(buffer.cursor_to_position(0, 6), 6);
 
-        // Test position to cursor
+        // Second line
+        assert_eq!(buffer.cursor_to_position(1, 0), 7);
+        assert_eq!(buffer.cursor_to_position(1, 3), 10);
+        assert_eq!(buffer.cursor_to_position(1, 6), 13);
+
+        // Third line
+        assert_eq!(buffer.cursor_to_position(2, 0), 14);
+        assert_eq!(buffer.cursor_to_position(2, 3), 17);
+        assert_eq!(buffer.cursor_to_position(2, 6), 20);
+
+        // Beyond line length (should clamp)
+        assert_eq!(buffer.cursor_to_position(0, 100), 6);
+        assert_eq!(buffer.cursor_to_position(1, 100), 13);
+    }
+
+    #[test]
+    fn test_position_to_cursor() {
+        let buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+
+        // First line
         assert_eq!(buffer.position_to_cursor(0), (0, 0));
-        assert_eq!(buffer.position_to_cursor(4), (0, 4));
+        assert_eq!(buffer.position_to_cursor(3), (0, 3));
+        assert_eq!(buffer.position_to_cursor(6), (0, 6));
+
+        // Second line
         assert_eq!(buffer.position_to_cursor(7), (1, 0));
-        assert_eq!(buffer.position_to_cursor(16), (2, 2));
+        assert_eq!(buffer.position_to_cursor(10), (1, 3));
+        assert_eq!(buffer.position_to_cursor(13), (1, 6));
+
+        // Third line
+        assert_eq!(buffer.position_to_cursor(14), (2, 0));
+        assert_eq!(buffer.position_to_cursor(17), (2, 3));
+        assert_eq!(buffer.position_to_cursor(20), (2, 6));
+
+        // Beyond text length
+        assert_eq!(buffer.position_to_cursor(100), (2, 6));
+    }
+
+    #[test]
+    fn test_cursor_position_roundtrip() {
+        let buffer = GapBuffer::from_text("A\nBB\nCCC\nDDDD");
+
+        for row in 0..4 {
+            for col in 0..=row + 1 {
+                let pos = buffer.cursor_to_position(row, col);
+                let (r, c) = buffer.position_to_cursor(pos);
+                assert_eq!(
+                    (r, c),
+                    (row, col.min(row + 1)),
+                    "Roundtrip failed for ({}, {})",
+                    row,
+                    col
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_lines() {
+        let buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+        assert_eq!(buffer.to_lines(), vec!["Line 1", "Line 2", "Line 3"]);
+
+        let buffer = GapBuffer::from_text("Single line");
+        assert_eq!(buffer.to_lines(), vec!["Single line"]);
+
+        let buffer = GapBuffer::from_text("");
+        assert_eq!(buffer.to_lines(), vec![""]);
+
+        let buffer = GapBuffer::from_text("Line with\n\nempty line");
+        assert_eq!(buffer.to_lines(), vec!["Line with", "", "empty line"]);
+    }
+
+    #[test]
+    fn test_line_count() {
+        assert_eq!(GapBuffer::from_text("").line_count(), 1);
+        assert_eq!(GapBuffer::from_text("One line").line_count(), 1);
+        assert_eq!(GapBuffer::from_text("Line 1\nLine 2").line_count(), 2);
+        assert_eq!(
+            GapBuffer::from_text("Line 1\nLine 2\nLine 3").line_count(),
+            3
+        );
+        assert_eq!(GapBuffer::from_text("Line 1\n\nLine 3").line_count(), 3);
+    }
+
+    // todo: impl get_line properly
+    // #[test]
+    // fn test_get_line() {
+    //     let buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+
+    //     // Note: get_line returns None for GapBuffer implementation
+    //     // Use all_lines() instead
+    //     assert_eq!(buffer.get_line(0), None);
+    //     assert_eq!(buffer.get_line(1), None);
+    //     assert_eq!(buffer.get_line(2), None);
+
+    //     // Verify data is accessible via all_lines()
+    //     let lines = buffer.all_lines();
+    //     assert_eq!(lines[0], "Line 1");
+    //     assert_eq!(lines[1], "Line 2");
+    //     assert_eq!(lines[2], "Line 3");
+    // }
+
+    #[test]
+    fn test_line_len() {
+        let buffer = GapBuffer::from_text("Short\nMedium line\nA very long line here");
+
+        assert_eq!(buffer.line_len(0), 5);
+        assert_eq!(buffer.line_len(1), 11);
+        assert_eq!(buffer.line_len(2), 21);
+        assert_eq!(buffer.line_len(3), 0); // Beyond line count
+    }
+
+    #[test]
+    fn test_insert_at() {
+        let mut buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+
+        // Insert in middle of line
+        buffer.insert_at(1, 5, "X");
+        assert_eq!(buffer.all_lines()[1], "Line X2");
+
+        // Insert at beginning of line
+        buffer.insert_at(0, 0, "Start: ");
+        assert_eq!(buffer.all_lines()[0], "Start: Line 1");
+
+        // Insert at end of line
+        buffer.insert_at(2, 6, " End");
+        assert_eq!(buffer.all_lines()[2], "Line 3 End");
+    }
+
+    #[test]
+    fn test_delete_at() {
+        let mut buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+
+        // Delete in middle of line
+        buffer.delete_at(1, 5);
+        assert_eq!(buffer.all_lines()[1], "Line ");
+
+        // Delete at end of line (merges with next)
+        buffer.delete_at(0, 6);
+        assert_eq!(buffer.to_lines(), vec!["Line 1Line ", "Line 3"]);
+    }
+
+    #[test]
+    fn test_backspace_at() {
+        let mut buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+
+        // Backspace in middle of line
+        buffer.backspace_at(1, 5);
+        assert_eq!(buffer.all_lines()[1], "Line2");
+
+        // Backspace at beginning of line (merges with previous)
+        buffer.backspace_at(2, 0);
+        assert_eq!(buffer.to_lines(), vec!["Line 1", "Line2Line 3"]);
+
+        // Backspace at beginning of first line (should do nothing)
+        buffer.backspace_at(0, 0);
+        assert_eq!(buffer.to_lines(), vec!["Line 1", "Line2Line 3"]);
     }
 
     #[test]
     fn test_grow_gap() {
         let mut buffer = GapBuffer::new();
 
-        // Insert text to fill up the initial gap
-        let long_text = "a".repeat(100);
-        buffer.insert(0, &long_text);
-        assert_eq!(buffer.to_string(), long_text);
+        // Test simple growth
+        let text = "a".repeat(100);
+        buffer.insert(0, &text);
+        assert_eq!(buffer.to_string(), text);
+        assert_eq!(buffer.len(), 100);
+    }
 
-        // Continue inserting to force gap growth
-        buffer.insert(50, "XXX");
-        assert_eq!(buffer.to_string().len(), 103);
-        assert!(buffer.to_string().contains("XXX"));
+    #[test]
+    fn test_gap_movement_preserves_text() {
+        let mut buffer = GapBuffer::new();
+
+        // Insert ABC at beginning
+        buffer.insert(0, "ABC");
+        assert_eq!(buffer.to_string(), "ABC");
+
+        // Insert DEF at end
+        buffer.insert(3, "DEF");
+        assert_eq!(buffer.to_string(), "ABCDEF");
+
+        // Move gap to middle and insert
+        buffer.insert(3, "123");
+        assert_eq!(buffer.to_string(), "ABC123DEF");
+
+        // Move gap to beginning and insert
+        buffer.insert(0, ">");
+        assert_eq!(buffer.to_string(), ">ABC123DEF");
+
+        // Move gap to end and insert
+        buffer.insert(10, "<");
+        assert_eq!(buffer.to_string(), ">ABC123DEF<");
+    }
+
+    #[test]
+    fn test_large_buffer_with_gap_movement() {
+        let mut buffer = GapBuffer::new();
+
+        // Create a scenario similar to the failing case but simpler
+        // Insert 70 a's (exceeds initial 64 capacity)
+        buffer.insert(0, &"a".repeat(70));
+        assert_eq!(buffer.to_string(), "a".repeat(70));
+
+        // Insert 50 b's at the end
+        buffer.insert(70, &"b".repeat(50));
+        let expected = format!("{}{}", "a".repeat(70), "b".repeat(50));
+        assert_eq!(buffer.to_string(), expected);
+
+        // Now move gap to middle and insert - this is where it was failing
+        buffer.insert(60, "XXX");
+        let expected = format!("{}XXX{}{}", "a".repeat(60), "a".repeat(10), "b".repeat(50));
+        assert_eq!(buffer.to_string(), expected);
+    }
+
+    #[test]
+    fn test_empty_buffer_operations() {
+        let mut buffer = GapBuffer::new();
+
+        // Operations on empty buffer
+        buffer.delete_backward();
+        assert_eq!(buffer.to_string(), "");
+
+        buffer.delete_forward();
+        assert_eq!(buffer.to_string(), "");
+
+        buffer.delete_range(0, 10);
+        assert_eq!(buffer.to_string(), "");
+
+        assert_eq!(buffer.cursor_to_position(0, 0), 0);
+        assert_eq!(buffer.position_to_cursor(0), (0, 0));
+    }
+
+    #[test]
+    fn test_newline_handling() {
+        let mut buffer = GapBuffer::new();
+
+        // Insert text with newlines
+        buffer.insert(0, "A\nB");
+        assert_eq!(buffer.line_count(), 2);
+        let lines = buffer.all_lines();
+        assert_eq!(lines[0], "A");
+        assert_eq!(lines[1], "B");
+
+        // Insert newline in middle
+        buffer.insert(1, "\n");
+        assert_eq!(buffer.line_count(), 3);
+        let lines = buffer.all_lines();
+        assert_eq!(lines[0], "A");
+        assert_eq!(lines[1], "");
+        assert_eq!(lines[2], "B");
+
+        // Delete newline
+        buffer.move_gap_to(2);
+        buffer.delete_backward();
+        assert_eq!(buffer.line_count(), 2);
+        let lines = buffer.all_lines();
+        assert_eq!(lines[0], "A");
+        assert_eq!(lines[1], "B");
+    }
+
+    #[test]
+    fn test_stress_random_operations() {
+        let mut buffer = GapBuffer::new();
+        let test_string = "The quick brown fox jumps over the lazy dog";
+
+        // Build string character by character at random positions
+        let chars: Vec<char> = test_string.chars().collect();
+        let mut positions = vec![];
+
+        for (i, ch) in chars.iter().enumerate() {
+            let pos = i / 2; // Insert roughly in middle as we go
+            buffer.insert(pos, &ch.to_string());
+            positions.push(pos);
+        }
+
+        // The string won't match exactly due to random positions,
+        // but should have same length
+        assert_eq!(buffer.len(), test_string.len());
+
+        // Delete some characters
+        for _ in 0..10 {
+            if buffer.len() > 0 {
+                buffer.move_gap_to(buffer.len() / 2);
+                buffer.delete_forward();
+            }
+        }
+
+        assert_eq!(buffer.len(), test_string.len() - 10);
+    }
+
+    #[test]
+    fn test_large_text() {
+        let large_text = "Line\n".repeat(1000);
+        let mut buffer = GapBuffer::from_text(&large_text);
+
+        assert_eq!(buffer.line_count(), 1000);
+
+        // Insert in middle of large text
+        buffer.insert(2500, "INSERTED");
+        assert!(buffer.to_string().contains("INSERTED"));
+
+        // Delete range in large text
+        buffer.delete_range(2500, 2508);
+        assert!(!buffer.to_string().contains("INSERTED"));
+
+        // Verify structure is intact
+        assert_eq!(buffer.line_count(), 1000);
+    }
+
+    #[test]
+    fn test_unicode_characters() {
+        let mut buffer = GapBuffer::from_text("Hello 世界");
+        assert_eq!(buffer.to_string(), "Hello 世界");
+        assert_eq!(buffer.len(), 8); // Note: char count, not byte count
+
+        buffer.insert(6, "🦀");
+        assert_eq!(buffer.to_string(), "Hello 🦀世界");
+
+        buffer.move_gap_to(7);
+        buffer.delete_backward();
+        assert_eq!(buffer.to_string(), "Hello 世界");
+
+        // Test with emoji and various unicode
+        let unicode_text = "😀😃😄 नमस्ते мир";
+        buffer = GapBuffer::from_text(unicode_text);
+        assert_eq!(buffer.to_string(), unicode_text);
+    }
+
+    #[test]
+    fn test_sequential_edits() {
+        let mut buffer = GapBuffer::new();
+
+        // Simulate typing
+        let text = "Hello World!";
+        for ch in text.chars() {
+            buffer.insert_char(ch);
+        }
+        assert_eq!(buffer.to_string(), text);
+
+        // Simulate backspacing
+        for _ in 0..6 {
+            buffer.delete_backward();
+        }
+        assert_eq!(buffer.to_string(), "Hello ");
+
+        // Continue typing
+        for ch in "Rust!".chars() {
+            buffer.insert_char(ch);
+        }
+        assert_eq!(buffer.to_string(), "Hello Rust!");
     }
 }
