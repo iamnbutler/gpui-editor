@@ -1,0 +1,9 @@
+[package]
+name = "gpui-editor"
+
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = {version = "0.2.2", features = ["test-support"]}
+gpui_util = "0.2.2"
