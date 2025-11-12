@@ -1,9 +1,14 @@
 [package]
 name = "gpui-editor"
-
 version = "0.1.0"
+
+authors = ["Nate Butler <iamnbutler@gmail.com>"]
+description = "A standalone editor component for GPUI"
 edition = "2021"
+keywords = ["gpui", "editor"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/iamnbutler/gpui-editor/"
 
 [dependencies]
 gpui = {version = "0.2.2", features = ["test-support"]}
-gpui_util = "0.2.2"
+gpui_util = { version = "0.2.2" }
