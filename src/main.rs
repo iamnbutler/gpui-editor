@@ -3,13 +3,20 @@ use gpui::*;
 mod editor;
 use editor::{CursorPosition, Editor, EditorConfig};
 
+actions!(editor_view, [MoveUp, MoveDown]);
+
 struct EditorView {
+    focus_handle: FocusHandle,
     lines: Vec<String>,
+    cursor_position: CursorPosition,
 }
 
 impl EditorView {
-    fn new() -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
         Self {
+            focus_handle,
+            cursor_position: CursorPosition { row: 0, col: 0 },
             lines: vec![
                 "use std::collections::HashMap;".to_string(),
                 "".to_string(),
@@ -37,11 +44,24 @@ impl EditorView {
             ],
         }
     }
+
+    fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor_position.row > 0 {
+            self.cursor_position.row -= 1;
+            cx.notify();
+        }
+    }
+
+    fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor_position.row < self.lines.len().saturating_sub(1) {
+            self.cursor_position.row += 1;
+            cx.notify();
+        }
+    }
 }
 
 impl Render for EditorView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        // Create a custom config
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let config = EditorConfig {
             line_height: px(22.0),
             font_size: px(15.0),
@@ -55,19 +75,27 @@ impl Render for EditorView {
             font_family: "JetBrains Mono".into(),
         };
 
-        // Set cursor to row 7 (the "let x = 42;" line)
-        let cursor = CursorPosition { row: 6, col: 8 };
-
         let editor_element = Editor::new("editor", self.lines.clone())
             .config(config)
-            .cursor_position(cursor);
+            .cursor_position(self.cursor_position);
 
-        editor_element
+        div()
+            .size_full()
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::move_up))
+            .on_action(cx.listener(Self::move_down))
+            .child(editor_element)
     }
 }
 
 fn main() {
     Application::new().run(|cx: &mut App| {
+        // Bind keyboard shortcuts
+        cx.bind_keys([
+            KeyBinding::new("up", MoveUp, None),
+            KeyBinding::new("down", MoveDown, None),
+        ]);
+
         cx.open_window(
             WindowOptions {
                 titlebar: Some(TitlebarOptions {
@@ -76,7 +104,12 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| EditorView::new()),
+            |window, cx| {
+                let view = cx.new(|cx| EditorView::new(cx));
+                let handle = cx.focus_handle();
+                window.focus(&handle);
+                view
+            },
         )
         .unwrap();
 
