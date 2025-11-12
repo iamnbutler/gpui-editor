@@ -11,6 +11,7 @@ pub struct EditorConfig {
     pub line_number_color: Rgba,
     pub gutter_bg_color: Rgba,
     pub editor_bg_color: Rgba,
+    pub active_line_bg_color: Rgba,
     pub font_family: SharedString,
 }
 
@@ -25,15 +26,23 @@ impl Default for EditorConfig {
             line_number_color: rgb(0x666666),
             gutter_bg_color: rgb(0x252525),
             editor_bg_color: rgb(0x1e1e1e),
+            active_line_bg_color: rgb(0x2a2a2a),
             font_family: "Monaco".into(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CursorPosition {
+    pub row: usize,
+    pub col: usize,
 }
 
 pub struct Editor {
     id: ElementId,
     lines: Vec<String>,
     config: EditorConfig,
+    cursor_position: CursorPosition,
 }
 
 impl Editor {
@@ -43,12 +52,41 @@ impl Editor {
             id,
             lines,
             config: EditorConfig::default(),
+            cursor_position: CursorPosition { row: 0, col: 0 },
         }
     }
 
     pub fn config(mut self, config: EditorConfig) -> Self {
         self.config = config;
         self
+    }
+
+    pub fn cursor_position(mut self, position: CursorPosition) -> Self {
+        self.cursor_position = position;
+        self
+    }
+
+    pub fn set_cursor_position(&mut self, position: CursorPosition) {
+        self.cursor_position = position;
+    }
+
+    /// Calculate the y position where a line starts
+    fn y_for_line(&self, line_index: usize, bounds: Bounds<Pixels>) -> Pixels {
+        bounds.origin.y + self.config.line_height * line_index as f32
+    }
+
+    /// Calculate the bounds for a given line (for backgrounds, etc)
+    fn line_bounds(&self, line_index: usize, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+        Bounds {
+            origin: point(
+                bounds.origin.x + self.config.gutter_width,
+                bounds.origin.y + self.config.line_height * line_index as f32,
+            ),
+            size: size(
+                bounds.size.width - self.config.gutter_width,
+                self.config.line_height,
+            ),
+        }
     }
 }
 
@@ -109,6 +147,7 @@ impl gpui::Element for Editor {
         let line_number_color = self.config.line_number_color;
         let gutter_bg_color = self.config.gutter_bg_color;
         let editor_bg_color = self.config.editor_bg_color;
+        let active_line_bg_color = self.config.active_line_bg_color;
 
         let gutter_bounds = Bounds {
             origin: bounds.origin,
@@ -136,8 +175,20 @@ impl gpui::Element for Editor {
             border_style: BorderStyle::Solid,
         });
 
+        // Paint active line background first (before any text)
+        let active_line_bounds = self.line_bounds(self.cursor_position.row, bounds);
+        window.paint_quad(PaintQuad {
+            bounds: active_line_bounds,
+            corner_radii: (0.0).into(),
+            background: active_line_bg_color.into(),
+            border_color: transparent_black(),
+            border_widths: (0.0).into(),
+            border_style: BorderStyle::Solid,
+        });
+
+        // Now paint all text on top
         for (i, line) in self.lines.iter().enumerate() {
-            let y = bounds.origin.y + line_height * (i as f32 + 0.75);
+            let line_y = self.y_for_line(i, bounds);
 
             let line_number = SharedString::new((i + 1).to_string());
             let line_number_len = line_number.len();
@@ -164,7 +215,7 @@ impl gpui::Element for Editor {
             );
 
             shaped_line_number
-                .paint(point(line_number_x, y), line_height, window, cx)
+                .paint(point(line_number_x, line_y), line_height, window, cx)
                 .log_err();
 
             let text_x = bounds.origin.x + gutter_width + gutter_padding;
@@ -190,7 +241,7 @@ impl gpui::Element for Editor {
             );
 
             shaped_line
-                .paint(point(text_x, y), line_height, window, cx)
+                .paint(point(text_x, line_y), line_height, window, cx)
                 .log_err();
         }
     }

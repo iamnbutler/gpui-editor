@@ -1,7 +1,7 @@
 use gpui::*;
 
 mod editor;
-use editor::{Editor, EditorConfig};
+use editor::{CursorPosition, Editor, EditorConfig};
 
 struct EditorView {
     lines: Vec<String>,
@@ -51,10 +51,16 @@ impl Render for EditorView {
             line_number_color: rgb(0x858585),
             gutter_bg_color: rgb(0x2a2a2a),
             editor_bg_color: rgb(0x1e1e1e),
+            active_line_bg_color: rgb(0x2a2a2a),
             font_family: "JetBrains Mono".into(),
         };
 
-        let editor_element = Editor::new("editor", self.lines.clone()).config(config);
+        // Set cursor to row 7 (the "let x = 42;" line)
+        let cursor = CursorPosition { row: 6, col: 8 };
+
+        let editor_element = Editor::new("editor", self.lines.clone())
+            .config(config)
+            .cursor_position(cursor);
 
         editor_element
     }
