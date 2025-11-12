@@ -1,6 +1,9 @@
+#![allow(unused, dead_code)]
+
 use gpui::*;
 
 mod editor;
+mod text_buffer;
 use editor::{CursorPosition, Editor, EditorConfig};
 
 actions!(editor_view, [MoveUp, MoveDown, MoveLeft, MoveRight]);

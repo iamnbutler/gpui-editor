@@ -1,6 +1,8 @@
 use gpui::*;
 use gpui_util::ResultExt;
 
+use crate::text_buffer::{SimpleBuffer, TextBuffer};
+
 #[derive(Clone)]
 pub struct EditorConfig {
     pub line_height: Pixels,
@@ -40,7 +42,7 @@ pub struct CursorPosition {
 
 pub struct Editor {
     id: ElementId,
-    lines: Vec<String>,
+    buffer: SimpleBuffer,
     config: EditorConfig,
     cursor_position: CursorPosition,
 }
@@ -50,7 +52,7 @@ impl Editor {
         let id = id.into();
         Self {
             id,
-            lines,
+            buffer: SimpleBuffer::new(lines),
             config: EditorConfig::default(),
             cursor_position: CursorPosition { row: 0, col: 0 },
         }
@@ -76,24 +78,16 @@ impl Editor {
         } else if self.cursor_position.row > 0 {
             // Move to end of previous line
             self.cursor_position.row -= 1;
-            self.cursor_position.col = self
-                .lines
-                .get(self.cursor_position.row)
-                .map(|line| line.len())
-                .unwrap_or(0);
+            self.cursor_position.col = self.buffer.line_len(self.cursor_position.row);
         }
     }
 
     pub fn move_right(&mut self) {
-        let current_line_len = self
-            .lines
-            .get(self.cursor_position.row)
-            .map(|line| line.len())
-            .unwrap_or(0);
+        let current_line_len = self.buffer.line_len(self.cursor_position.row);
 
         if self.cursor_position.col < current_line_len {
             self.cursor_position.col += 1;
-        } else if self.cursor_position.row < self.lines.len().saturating_sub(1) {
+        } else if self.cursor_position.row < self.buffer.line_count().saturating_sub(1) {
             // Move to start of next line
             self.cursor_position.row += 1;
             self.cursor_position.col = 0;
@@ -104,24 +98,16 @@ impl Editor {
         if self.cursor_position.row > 0 {
             self.cursor_position.row -= 1;
             // Clamp column to line length
-            let line_len = self
-                .lines
-                .get(self.cursor_position.row)
-                .map(|line| line.len())
-                .unwrap_or(0);
+            let line_len = self.buffer.line_len(self.cursor_position.row);
             self.cursor_position.col = self.cursor_position.col.min(line_len);
         }
     }
 
     pub fn move_down(&mut self) {
-        if self.cursor_position.row < self.lines.len().saturating_sub(1) {
+        if self.cursor_position.row < self.buffer.line_count().saturating_sub(1) {
             self.cursor_position.row += 1;
             // Clamp column to line length
-            let line_len = self
-                .lines
-                .get(self.cursor_position.row)
-                .map(|line| line.len())
-                .unwrap_or(0);
+            let line_len = self.buffer.line_len(self.cursor_position.row);
             self.cursor_position.col = self.cursor_position.col.min(line_len);
         }
     }
@@ -152,7 +138,7 @@ impl Editor {
 
         // Calculate x position based on column
         let mut x_offset = Pixels::ZERO;
-        if let Some(line) = self.lines.get(self.cursor_position.row) {
+        if let Some(line) = self.buffer.get_line(self.cursor_position.row) {
             if self.cursor_position.col > 0 {
                 let text_before_cursor = SharedString::from(
                     line[..self.cursor_position.col.min(line.len())].to_string(),
@@ -281,7 +267,8 @@ impl gpui::Element for Editor {
         });
 
         // Now paint all text on top
-        for (i, line) in self.lines.iter().enumerate() {
+        let lines = self.buffer.all_lines();
+        for (i, line) in lines.iter().enumerate() {
             let line_y = self.y_for_line(i, bounds);
 
             let line_number = SharedString::new((i + 1).to_string());
