@@ -305,6 +305,7 @@ impl Render for EditorView {
             .child(EditorElement {
                 entity: cx.entity().clone(),
                 editor_element,
+                mouse_down_position: None,
             })
     }
 }
@@ -346,6 +347,7 @@ fn main() {
 struct EditorElement {
     entity: Entity<EditorView>,
     editor_element: Editor,
+    mouse_down_position: Option<Point<Pixels>>,
 }
 
 impl IntoElement for EditorElement {
@@ -413,7 +415,47 @@ impl Element for EditorElement {
             cx,
         );
 
-        // Then handle input if focused
+        // Handle mouse events
+        let entity = self.entity.clone();
+        let mouse_down_position = self.mouse_down_position;
+
+        window.on_mouse_event::<MouseDownEvent>(move |mouse_down, phase, window, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+
+            if bounds.contains(&mouse_down.position) {
+                // Store the mouse down position for click handling
+                entity.update(cx, |view, cx| {
+                    // Create a temporary editor to calculate cursor position
+                    let config = EditorConfig {
+                        line_height: px(22.0),
+                        font_size: px(15.0),
+                        gutter_width: px(60.0),
+                        gutter_padding: px(12.0),
+                        text_color: rgb(0xdcdcdc),
+                        line_number_color: rgb(0x858585),
+                        gutter_bg_color: rgb(0x2a2a2a),
+                        editor_bg_color: rgb(0x1e1e1e),
+                        active_line_bg_color: rgb(0x2a2a2a),
+                        font_family: "JetBrains Mono".into(),
+                    };
+
+                    let mut editor = Editor::new("temp", view.buffer.all_lines())
+                        .config(config)
+                        .cursor_position(view.cursor_position);
+
+                    let new_cursor = editor.position_to_cursor(mouse_down.position, bounds, window);
+                    view.cursor_position = new_cursor;
+
+                    // Focus the editor when clicked
+                    window.focus(&view.focus_handle);
+                    cx.notify();
+                });
+            }
+        });
+
+        // Handle input if focused
         self.entity.read_with(cx, |view, _| {
             if view.focus_handle.is_focused(window) {
                 let input_handler = ElementInputHandler::new(bounds, self.entity.clone());
