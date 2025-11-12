@@ -1,7 +1,5 @@
 use crate::text_buffer::TextBuffer;
 
-/// A gap buffer implementation for efficient text editing
-///
 /// The gap buffer maintains a "gap" in the text where insertions and deletions
 /// occur. This makes operations at the cursor position O(1).
 #[derive(Debug, Clone)]
@@ -259,13 +257,8 @@ impl TextBuffer for GapBuffer {
         }
     }
 
-    // todo: impl get_line properly
     fn get_line(&self, line_idx: usize) -> Option<&str> {
-        // Since we can't easily return a stable reference to a line
-        // from a gap buffer without complex caching, we return None.
-        // The editor should use all_lines() instead for now.
-        // TODO: Implement proper line caching if needed for performance
-        None
+        todo!("impl get_line")
     }
 
     fn all_lines(&self) -> Vec<String> {
