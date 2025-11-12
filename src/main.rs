@@ -1,13 +1,13 @@
 use gpui::*;
 
-mod editor_element;
-use editor_element::Element;
+mod editor;
+use editor::Editor;
 
-struct Editor {
+struct EditorView {
     lines: Vec<String>,
 }
 
-impl Editor {
+impl EditorView {
     fn new() -> Self {
         Self {
             lines: vec![
@@ -20,9 +20,9 @@ impl Editor {
     }
 }
 
-impl Render for Editor {
+impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let editor_element = Element::new("editor", self.lines.clone());
+        let editor_element = Editor::new("editor", self.lines.clone());
 
         editor_element
     }
@@ -38,7 +38,7 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| Editor::new()),
+            |_window, cx| cx.new(|_cx| EditorView::new()),
         )
         .unwrap();
 

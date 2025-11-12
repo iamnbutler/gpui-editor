@@ -1,19 +1,19 @@
 use gpui::*;
 use gpui_util::ResultExt;
 
-pub struct Element {
+pub struct Editor {
     id: ElementId,
     lines: Vec<String>,
 }
 
-impl Element {
+impl Editor {
     pub fn new(id: impl Into<ElementId>, lines: Vec<String>) -> Self {
         let id = id.into();
         Self { id, lines }
     }
 }
 
-impl gpui::Element for Element {
+impl gpui::Element for Editor {
     type RequestLayoutState = ();
     type PrepaintState = ();
 
@@ -106,7 +106,7 @@ impl gpui::Element for Element {
     }
 }
 
-impl IntoElement for Element {
+impl IntoElement for Editor {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
