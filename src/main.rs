@@ -3,7 +3,7 @@ use gpui::*;
 mod editor;
 use editor::{CursorPosition, Editor, EditorConfig};
 
-actions!(editor_view, [MoveUp, MoveDown]);
+actions!(editor_view, [MoveUp, MoveDown, MoveLeft, MoveRight]);
 
 struct EditorView {
     focus_handle: FocusHandle,
@@ -48,6 +48,13 @@ impl EditorView {
     fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
         if self.cursor_position.row > 0 {
             self.cursor_position.row -= 1;
+            // Clamp column to line length
+            let line_len = self
+                .lines
+                .get(self.cursor_position.row)
+                .map(|line| line.len())
+                .unwrap_or(0);
+            self.cursor_position.col = self.cursor_position.col.min(line_len);
             cx.notify();
         }
     }
@@ -55,8 +62,47 @@ impl EditorView {
     fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
         if self.cursor_position.row < self.lines.len().saturating_sub(1) {
             self.cursor_position.row += 1;
+            // Clamp column to line length
+            let line_len = self
+                .lines
+                .get(self.cursor_position.row)
+                .map(|line| line.len())
+                .unwrap_or(0);
+            self.cursor_position.col = self.cursor_position.col.min(line_len);
             cx.notify();
         }
+    }
+
+    fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor_position.col > 0 {
+            self.cursor_position.col -= 1;
+        } else if self.cursor_position.row > 0 {
+            // Move to end of previous line
+            self.cursor_position.row -= 1;
+            self.cursor_position.col = self
+                .lines
+                .get(self.cursor_position.row)
+                .map(|line| line.len())
+                .unwrap_or(0);
+        }
+        cx.notify();
+    }
+
+    fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
+        let current_line_len = self
+            .lines
+            .get(self.cursor_position.row)
+            .map(|line| line.len())
+            .unwrap_or(0);
+
+        if self.cursor_position.col < current_line_len {
+            self.cursor_position.col += 1;
+        } else if self.cursor_position.row < self.lines.len().saturating_sub(1) {
+            // Move to start of next line
+            self.cursor_position.row += 1;
+            self.cursor_position.col = 0;
+        }
+        cx.notify();
     }
 }
 
@@ -84,6 +130,8 @@ impl Render for EditorView {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::move_up))
             .on_action(cx.listener(Self::move_down))
+            .on_action(cx.listener(Self::move_left))
+            .on_action(cx.listener(Self::move_right))
             .child(editor_element)
     }
 }
@@ -94,6 +142,8 @@ fn main() {
         cx.bind_keys([
             KeyBinding::new("up", MoveUp, None),
             KeyBinding::new("down", MoveDown, None),
+            KeyBinding::new("left", MoveLeft, None),
+            KeyBinding::new("right", MoveRight, None),
         ]);
 
         cx.open_window(

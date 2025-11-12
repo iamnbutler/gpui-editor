@@ -70,6 +70,62 @@ impl Editor {
         self.cursor_position = position;
     }
 
+    pub fn move_left(&mut self) {
+        if self.cursor_position.col > 0 {
+            self.cursor_position.col -= 1;
+        } else if self.cursor_position.row > 0 {
+            // Move to end of previous line
+            self.cursor_position.row -= 1;
+            self.cursor_position.col = self
+                .lines
+                .get(self.cursor_position.row)
+                .map(|line| line.len())
+                .unwrap_or(0);
+        }
+    }
+
+    pub fn move_right(&mut self) {
+        let current_line_len = self
+            .lines
+            .get(self.cursor_position.row)
+            .map(|line| line.len())
+            .unwrap_or(0);
+
+        if self.cursor_position.col < current_line_len {
+            self.cursor_position.col += 1;
+        } else if self.cursor_position.row < self.lines.len().saturating_sub(1) {
+            // Move to start of next line
+            self.cursor_position.row += 1;
+            self.cursor_position.col = 0;
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.cursor_position.row > 0 {
+            self.cursor_position.row -= 1;
+            // Clamp column to line length
+            let line_len = self
+                .lines
+                .get(self.cursor_position.row)
+                .map(|line| line.len())
+                .unwrap_or(0);
+            self.cursor_position.col = self.cursor_position.col.min(line_len);
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.cursor_position.row < self.lines.len().saturating_sub(1) {
+            self.cursor_position.row += 1;
+            // Clamp column to line length
+            let line_len = self
+                .lines
+                .get(self.cursor_position.row)
+                .map(|line| line.len())
+                .unwrap_or(0);
+            self.cursor_position.col = self.cursor_position.col.min(line_len);
+        }
+    }
+
     /// Calculate the y position where a line starts
     fn y_for_line(&self, line_index: usize, bounds: Bounds<Pixels>) -> Pixels {
         bounds.origin.y + self.config.line_height * line_index as f32
@@ -87,6 +143,44 @@ impl Editor {
                 self.config.line_height,
             ),
         }
+    }
+
+    /// Calculate the pixel position for the cursor
+    fn cursor_position_px(&self, bounds: Bounds<Pixels>, window: &Window) -> Point<Pixels> {
+        let line_y = self.y_for_line(self.cursor_position.row, bounds);
+        let text_x_start = bounds.origin.x + self.config.gutter_width + self.config.gutter_padding;
+
+        // Calculate x position based on column
+        let mut x_offset = Pixels::ZERO;
+        if let Some(line) = self.lines.get(self.cursor_position.row) {
+            if self.cursor_position.col > 0 {
+                let text_before_cursor = SharedString::from(
+                    line[..self.cursor_position.col.min(line.len())].to_string(),
+                );
+                let shaped = window.text_system().shape_line(
+                    text_before_cursor.clone(),
+                    self.config.font_size,
+                    &[TextRun {
+                        len: text_before_cursor.len(),
+                        font: Font {
+                            family: self.config.font_family.clone(),
+                            features: Default::default(),
+                            weight: FontWeight::NORMAL,
+                            style: FontStyle::Normal,
+                            fallbacks: Default::default(),
+                        },
+                        color: self.config.text_color.into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                );
+                x_offset = shaped.width;
+            }
+        }
+
+        point(text_x_start + x_offset, line_y)
     }
 }
 
@@ -244,6 +338,21 @@ impl gpui::Element for Editor {
                 .paint(point(text_x, line_y), line_height, window, cx)
                 .log_err();
         }
+
+        // Paint cursor
+        let cursor_pos = self.cursor_position_px(bounds, window);
+        let cursor_bounds = Bounds {
+            origin: cursor_pos,
+            size: size(px(2.0), line_height),
+        };
+        window.paint_quad(PaintQuad {
+            bounds: cursor_bounds,
+            corner_radii: (0.0).into(),
+            background: rgb(0xffffff).into(),
+            border_color: transparent_black(),
+            border_widths: (0.0).into(),
+            border_style: BorderStyle::Solid,
+        });
     }
 }
 
