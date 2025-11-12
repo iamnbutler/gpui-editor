@@ -1,7 +1,7 @@
 use gpui::*;
 use gpui_util::ResultExt;
 
-mod render;
+mod paint;
 
 use crate::text_buffer::{SimpleBuffer, TextBuffer};
 
@@ -231,92 +231,17 @@ impl gpui::Element for Editor {
         let editor_bg_color = self.config.editor_bg_color;
         let active_line_bg_color = self.config.active_line_bg_color;
 
+        // background
         self.paint_gutter_background(window, bounds);
+        self.paint_editor_background(window, bounds);
 
-        let editor_bounds = Bounds {
-            origin: point(bounds.origin.x + gutter_width, bounds.origin.y),
-            size: size(bounds.size.width - gutter_width, bounds.size.height),
-        };
-        window.paint_quad(PaintQuad {
-            bounds: editor_bounds,
-            corner_radii: (0.0).into(),
-            background: editor_bg_color.into(),
-            border_color: transparent_black(),
-            border_widths: (0.0).into(),
-            border_style: BorderStyle::Solid,
-        });
+        // underlay
+        self.paint_active_line_background(window, bounds);
 
-        // Paint active line background first (before any text)
-        let active_line_bounds = self.line_bounds(self.cursor_position.row, bounds);
-        window.paint_quad(PaintQuad {
-            bounds: active_line_bounds,
-            corner_radii: (0.0).into(),
-            background: active_line_bg_color.into(),
-            border_color: transparent_black(),
-            border_widths: (0.0).into(),
-            border_style: BorderStyle::Solid,
-        });
+        // content
+        self.paint_lines(cx, window, bounds);
 
-        // Now paint all text on top
-        let lines = self.buffer.all_lines();
-        for (i, line) in lines.iter().enumerate() {
-            let line_y = self.y_for_line(i, bounds);
-
-            let line_number = SharedString::new((i + 1).to_string());
-            let line_number_len = line_number.len();
-            let line_number_x = bounds.origin.x + gutter_width - gutter_padding - px(20.0); // Right-align
-
-            let shaped_line_number = window.text_system().shape_line(
-                line_number,
-                font_size,
-                &[TextRun {
-                    len: line_number_len,
-                    font: Font {
-                        family: self.config.font_family.clone(),
-                        features: Default::default(),
-                        weight: FontWeight::NORMAL,
-                        style: FontStyle::Normal,
-                        fallbacks: Default::default(),
-                    },
-                    color: line_number_color.into(),
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                }],
-                None,
-            );
-
-            shaped_line_number
-                .paint(point(line_number_x, line_y), line_height, window, cx)
-                .log_err();
-
-            let text_x = bounds.origin.x + gutter_width + gutter_padding;
-
-            let shaped_line = window.text_system().shape_line(
-                line.into(),
-                font_size,
-                &[TextRun {
-                    len: line.len(),
-                    font: Font {
-                        family: self.config.font_family.clone(),
-                        features: Default::default(),
-                        weight: FontWeight::NORMAL,
-                        style: FontStyle::Normal,
-                        fallbacks: Default::default(),
-                    },
-                    color: text_color.into(),
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                }],
-                None,
-            );
-
-            shaped_line
-                .paint(point(text_x, line_y), line_height, window, cx)
-                .log_err();
-        }
-
+        // overlay
         self.paint_cursor(window, bounds);
     }
 }
