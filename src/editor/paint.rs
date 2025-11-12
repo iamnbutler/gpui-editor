@@ -62,7 +62,7 @@ impl Editor {
         let lines = self.buffer.all_lines();
         for (i, line) in lines.iter().enumerate() {
             let line_bounds = self.line_bounds(i, bounds);
-            self.paint_line_number(cx, window, i + 1, line_bounds);
+            self.paint_line_number(cx, window, i + 1, line_bounds, bounds);
             self.paint_line_content(cx, window, line, line_bounds);
         }
     }
@@ -73,12 +73,13 @@ impl Editor {
         window: &mut Window,
         line_number: usize,
         line_bounds: Bounds<Pixels>,
+        editor_bounds: Bounds<Pixels>,
     ) {
         let line_number_str = SharedString::new(line_number.to_string());
         let line_number_len = line_number_str.len();
         let gutter_padding = px(10.0);
         let line_number_x =
-            line_bounds.origin.x + self.config.gutter_width - gutter_padding - px(20.0);
+            editor_bounds.origin.x + self.config.gutter_width - gutter_padding - px(20.0);
 
         let shaped_line_number = window.text_system().shape_line(
             line_number_str,
@@ -118,7 +119,7 @@ impl Editor {
         line_bounds: Bounds<Pixels>,
     ) {
         let gutter_padding = px(10.0);
-        let text_x = line_bounds.origin.x + self.config.gutter_width + gutter_padding;
+        let text_x = line_bounds.origin.x + gutter_padding;
         let line = line.into();
 
         let shaped_line = window.text_system().shape_line(
