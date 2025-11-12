@@ -18,11 +18,8 @@ impl GapBuffer {
     /// Create a new empty gap buffer
     pub fn new() -> Self {
         let initial_capacity = 64;
-        let mut buffer = Vec::with_capacity(initial_capacity);
-        buffer.resize(initial_capacity, '\0');
-
         Self {
-            buffer,
+            buffer: vec!['\0'; initial_capacity],
             gap_start: 0,
             gap_end: initial_capacity,
         }
@@ -35,9 +32,12 @@ impl GapBuffer {
         let gap_size = 64.max(text_len / 4); // At least 64 chars gap
         let total_size = text_len + gap_size;
 
-        let mut buffer = Vec::with_capacity(total_size);
-        buffer.extend_from_slice(&chars);
-        buffer.resize(total_size, '\0');
+        let mut buffer = vec!['\0'; total_size];
+
+        // Copy text to beginning of buffer
+        for (i, &ch) in chars.iter().enumerate() {
+            buffer[i] = ch;
+        }
 
         Self {
             buffer,
@@ -62,15 +62,6 @@ impl GapBuffer {
         self.gap_end - self.gap_start
     }
 
-    /// Convert a text position to a buffer position
-    fn text_pos_to_buffer_pos(&self, text_pos: usize) -> usize {
-        if text_pos < self.gap_start {
-            text_pos
-        } else {
-            text_pos + self.gap_size()
-        }
-    }
-
     /// Move the gap to a specific text position
     pub fn move_gap_to(&mut self, text_pos: usize) {
         let text_pos = text_pos.min(self.len());
@@ -82,30 +73,27 @@ impl GapBuffer {
         if text_pos < self.gap_start {
             // Move gap left
             let move_count = self.gap_start - text_pos;
-            let src_start = text_pos;
-            let dst_start = self.gap_end - move_count;
 
-            // Copy characters from before gap to after gap
+            // Move characters from before gap to after gap
             for i in (0..move_count).rev() {
-                self.buffer[dst_start + i] = self.buffer[src_start + i];
+                self.buffer[self.gap_end - 1 - i] = self.buffer[self.gap_start - 1 - i];
             }
 
-            self.gap_start = text_pos;
-            self.gap_end = text_pos + self.gap_size();
+            self.gap_end -= move_count;
+            self.gap_start -= move_count;
         } else {
             // Move gap right
+            // text_pos is in the region after the gap, so we need to account for gap size
             let buffer_pos = text_pos + self.gap_size();
             let move_count = buffer_pos - self.gap_end;
-            let src_start = self.gap_end;
-            let dst_start = self.gap_start;
 
-            // Copy characters from after gap to before gap
+            // Move characters from after gap to before gap
             for i in 0..move_count {
-                self.buffer[dst_start + i] = self.buffer[src_start + i];
+                self.buffer[self.gap_start + i] = self.buffer[self.gap_end + i];
             }
 
-            self.gap_start = text_pos;
-            self.gap_end = buffer_pos;
+            self.gap_start += move_count;
+            self.gap_end += move_count;
         }
     }
 
@@ -152,8 +140,11 @@ impl GapBuffer {
         }
 
         self.move_gap_to(start);
+
+        // Expand gap to cover the deletion range
         let delete_count = end - start;
-        self.gap_end = (self.gap_end + delete_count).min(self.buffer.len());
+        let new_gap_end = (self.gap_end + delete_count).min(self.buffer.len());
+        self.gap_end = new_gap_end;
     }
 
     /// Grow the gap when it becomes too small
@@ -162,21 +153,22 @@ impl GapBuffer {
         let old_size = self.buffer.len();
         let new_size = old_size + new_gap_size;
 
-        // Create new buffer
-        let mut new_buffer = Vec::with_capacity(new_size);
+        // Create new buffer with more space
+        let mut new_buffer = vec!['\0'; new_size];
 
         // Copy text before gap
-        new_buffer.extend_from_slice(&self.buffer[..self.gap_start]);
+        for i in 0..self.gap_start {
+            new_buffer[i] = self.buffer[i];
+        }
 
-        // Add new gap space
-        new_buffer.resize(self.gap_start + new_gap_size, '\0');
+        // Copy text after gap to the new position
+        let text_after_gap = old_size - self.gap_end;
+        for i in 0..text_after_gap {
+            new_buffer[self.gap_start + new_gap_size + i] = self.buffer[self.gap_end + i];
+        }
 
-        // Copy text after gap
-        new_buffer.extend_from_slice(&self.buffer[self.gap_end..]);
-
-        let old_gap_size = self.gap_size();
         self.buffer = new_buffer;
-        self.gap_end = self.gap_start + new_gap_size + old_gap_size;
+        self.gap_end = self.gap_start + new_gap_size;
     }
 
     /// Get the text as a string
@@ -184,17 +176,26 @@ impl GapBuffer {
         let mut result = String::with_capacity(self.len());
 
         // Add text before gap
-        result.extend(&self.buffer[..self.gap_start]);
+        for i in 0..self.gap_start {
+            result.push(self.buffer[i]);
+        }
 
         // Add text after gap
-        result.extend(&self.buffer[self.gap_end..]);
+        for i in self.gap_end..self.buffer.len() {
+            result.push(self.buffer[i]);
+        }
 
         result
     }
 
     /// Get all lines as a vector of strings
     pub fn to_lines(&self) -> Vec<String> {
-        self.to_string().lines().map(|s| s.to_string()).collect()
+        let text = self.to_string();
+        if text.is_empty() {
+            vec![String::new()]
+        } else {
+            text.lines().map(|s| s.to_string()).collect()
+        }
     }
 
     /// Convert cursor position (row, col) to text position
@@ -266,11 +267,7 @@ impl TextBuffer for GapBuffer {
     }
 
     fn all_lines(&self) -> Vec<String> {
-        let mut lines = self.to_lines();
-        if lines.is_empty() {
-            lines.push(String::new());
-        }
-        lines
+        self.to_lines()
     }
 
     fn insert_at(&mut self, row: usize, col: usize, text: &str) {
@@ -320,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_cursor_conversion() {
-        let mut buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
+        let buffer = GapBuffer::from_text("Line 1\nLine 2\nLine 3");
 
         // Test cursor to position
         assert_eq!(buffer.cursor_to_position(0, 0), 0);
@@ -333,5 +330,20 @@ mod tests {
         assert_eq!(buffer.position_to_cursor(4), (0, 4));
         assert_eq!(buffer.position_to_cursor(7), (1, 0));
         assert_eq!(buffer.position_to_cursor(16), (2, 2));
+    }
+
+    #[test]
+    fn test_grow_gap() {
+        let mut buffer = GapBuffer::new();
+
+        // Insert text to fill up the initial gap
+        let long_text = "a".repeat(100);
+        buffer.insert(0, &long_text);
+        assert_eq!(buffer.to_string(), long_text);
+
+        // Continue inserting to force gap growth
+        buffer.insert(50, "XXX");
+        assert_eq!(buffer.to_string().len(), 103);
+        assert!(buffer.to_string().contains("XXX"));
     }
 }
