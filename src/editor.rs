@@ -1,15 +1,54 @@
 use gpui::*;
 use gpui_util::ResultExt;
 
+#[derive(Clone)]
+pub struct EditorConfig {
+    pub line_height: Pixels,
+    pub font_size: Pixels,
+    pub gutter_width: Pixels,
+    pub gutter_padding: Pixels,
+    pub text_color: Rgba,
+    pub line_number_color: Rgba,
+    pub gutter_bg_color: Rgba,
+    pub editor_bg_color: Rgba,
+    pub font_family: SharedString,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            line_height: px(20.0),
+            font_size: px(14.0),
+            gutter_width: px(50.0),
+            gutter_padding: px(10.0),
+            text_color: rgb(0xcccccc),
+            line_number_color: rgb(0x666666),
+            gutter_bg_color: rgb(0x252525),
+            editor_bg_color: rgb(0x1e1e1e),
+            font_family: "Monaco".into(),
+        }
+    }
+}
+
 pub struct Editor {
     id: ElementId,
     lines: Vec<String>,
+    config: EditorConfig,
 }
 
 impl Editor {
     pub fn new(id: impl Into<ElementId>, lines: Vec<String>) -> Self {
         let id = id.into();
-        Self { id, lines }
+        Self {
+            id,
+            lines,
+            config: EditorConfig::default(),
+        }
+    }
+
+    pub fn config(mut self, config: EditorConfig) -> Self {
+        self.config = config;
+        self
     }
 }
 
@@ -62,14 +101,14 @@ impl gpui::Element for Editor {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let line_height = px(20.0);
-        let font_size = px(14.0);
-        let gutter_width = px(50.0);
-        let gutter_padding = px(10.0);
-        let text_color = rgb(0xcccccc);
-        let line_number_color = rgb(0x666666);
-        let gutter_bg_color = transparent_black();
-        let editor_bg_color = transparent_black();
+        let line_height = self.config.line_height;
+        let font_size = self.config.font_size;
+        let gutter_width = self.config.gutter_width;
+        let gutter_padding = self.config.gutter_padding;
+        let text_color = self.config.text_color;
+        let line_number_color = self.config.line_number_color;
+        let gutter_bg_color = self.config.gutter_bg_color;
+        let editor_bg_color = self.config.editor_bg_color;
 
         let gutter_bounds = Bounds {
             origin: bounds.origin,
@@ -110,7 +149,7 @@ impl gpui::Element for Editor {
                 &[TextRun {
                     len: line_number_len,
                     font: Font {
-                        family: "Monaco".into(),
+                        family: self.config.font_family.clone(),
                         features: Default::default(),
                         weight: FontWeight::NORMAL,
                         style: FontStyle::Normal,
@@ -136,7 +175,7 @@ impl gpui::Element for Editor {
                 &[TextRun {
                     len: line.len(),
                     font: Font {
-                        family: "Monaco".into(),
+                        family: self.config.font_family.clone(),
                         features: Default::default(),
                         weight: FontWeight::NORMAL,
                         style: FontStyle::Normal,

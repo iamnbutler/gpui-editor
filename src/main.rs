@@ -1,7 +1,7 @@
 use gpui::*;
 
 mod editor;
-use editor::Editor;
+use editor::{Editor, EditorConfig};
 
 struct EditorView {
     lines: Vec<String>,
@@ -41,7 +41,20 @@ impl EditorView {
 
 impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let editor_element = Editor::new("editor", self.lines.clone());
+        // Create a custom config
+        let config = EditorConfig {
+            line_height: px(22.0),
+            font_size: px(15.0),
+            gutter_width: px(60.0),
+            gutter_padding: px(12.0),
+            text_color: rgb(0xdcdcdc),
+            line_number_color: rgb(0x858585),
+            gutter_bg_color: rgb(0x2a2a2a),
+            editor_bg_color: rgb(0x1e1e1e),
+            font_family: "JetBrains Mono".into(),
+        };
+
+        let editor_element = Editor::new("editor", self.lines.clone()).config(config);
 
         editor_element
     }
