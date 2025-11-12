@@ -1,6 +1,8 @@
 use gpui::*;
 use gpui_util::ResultExt;
 
+mod render;
+
 use crate::text_buffer::{SimpleBuffer, TextBuffer};
 
 #[derive(Clone)]
@@ -229,18 +231,7 @@ impl gpui::Element for Editor {
         let editor_bg_color = self.config.editor_bg_color;
         let active_line_bg_color = self.config.active_line_bg_color;
 
-        let gutter_bounds = Bounds {
-            origin: bounds.origin,
-            size: size(gutter_width, bounds.size.height),
-        };
-        window.paint_quad(PaintQuad {
-            bounds: gutter_bounds,
-            corner_radii: (0.0).into(),
-            background: gutter_bg_color.into(),
-            border_color: transparent_black(),
-            border_widths: (0.0).into(),
-            border_style: BorderStyle::Solid,
-        });
+        self.paint_gutter_background(window, bounds);
 
         let editor_bounds = Bounds {
             origin: point(bounds.origin.x + gutter_width, bounds.origin.y),
@@ -326,20 +317,7 @@ impl gpui::Element for Editor {
                 .log_err();
         }
 
-        // Paint cursor
-        let cursor_pos = self.cursor_position_px(bounds, window);
-        let cursor_bounds = Bounds {
-            origin: cursor_pos,
-            size: size(px(2.0), line_height),
-        };
-        window.paint_quad(PaintQuad {
-            bounds: cursor_bounds,
-            corner_radii: (0.0).into(),
-            background: rgb(0xffffff).into(),
-            border_color: transparent_black(),
-            border_widths: (0.0).into(),
-            border_style: BorderStyle::Solid,
-        });
+        self.paint_cursor(window, bounds);
     }
 }
 
