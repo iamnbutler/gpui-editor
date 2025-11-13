@@ -4,21 +4,6 @@
 
 A open editor component for gpui – aspires to a Monaco-equivalent for gpui
 
-## Features
-
-- ✅ **TextMate-based Syntax Highlighting** - Full syntax highlighting support using Sublime Text's TextMate grammars via `syntect`
-- ✅ **Multiple Language Support** - Rust, JavaScript, Python, Go, HTML, and many more
-- ✅ **Theme Support** - Multiple built-in themes (Monokai, Solarized, Base16, etc.)
-- ✅ **Basic Text Editing** - Insert, delete, backspace, cursor movement
-- ✅ **Gap Buffer Implementation** - Efficient text editing for most use cases
-
-### Keyboard Shortcuts
-
-- **Navigation**: Arrow keys for cursor movement
-- **Editing**: Type to insert, Backspace/Delete to remove text
-- **Themes**: `Cmd+T` / `Cmd+Shift+T` to cycle through themes
-- **Languages**: `Cmd+L` / `Cmd+Shift+L` to cycle through language samples
-
 ## Game plan
 
 Building a standalone editor component is probably like trying to boil the ocean... so I'll be trying to break it down into some smaller steps.
@@ -33,6 +18,13 @@ Building a standalone editor component is probably like trying to boil the ocean
 There are probably 800 missing steps in there, we'll just have to figure it out on the way.
 
 Note: It's likely this crate becomes `gpui-kit-editor` in the future.
+
+### Try it:
+
+- **Navigation**: Arrow keys for cursor movement
+- **Editing**: Type to insert, Backspace/Delete to remove text
+- **Themes**: `Cmd+T` / `Cmd+Shift+T` to cycle through themes
+- **Languages**: `Cmd+L` / `Cmd+Shift+L` to cycle through language samples
 
 ## License
 
