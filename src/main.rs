@@ -29,7 +29,11 @@ actions!(
         PreviousTheme,
         NextLanguage,
         PreviousLanguage,
-        SelectAll
+        SelectAll,
+        Escape,
+        Copy,
+        Cut,
+        Paste
     ]
 );
 
@@ -383,9 +387,141 @@ func main() {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        println!("SelectAll action triggered");
         self.editor.select_all();
         self.cursor_position = self.editor.get_cursor_position();
         cx.notify();
+        println!("All text selected");
+    }
+
+    fn escape(&mut self, _: &Escape, _: &mut Window, cx: &mut Context<Self>) {
+        println!("Escape action triggered - clearing selection");
+        self.editor.clear_selection();
+        cx.notify();
+    }
+
+    fn copy(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
+        println!("Copy action triggered");
+        if let Some((start, end)) = self.editor.get_selection_range() {
+            let text = self.get_selected_text(start, end);
+            println!("Copying text: {:?}", text);
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            println!("Text copied to clipboard");
+        } else {
+            println!("No selection to copy");
+        }
+    }
+
+    fn cut(&mut self, _: &Cut, _window: &mut Window, cx: &mut Context<Self>) {
+        println!("Cut action triggered");
+        if let Some((start, end)) = self.editor.get_selection_range() {
+            println!(
+                "Cutting selection from ({},{}) to ({},{})",
+                start.row, start.col, end.row, end.col
+            );
+            // Get the selected text to copy to clipboard
+            let text = self.get_selected_text(start, end);
+            println!("Cutting text: {:?}", text);
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+
+            // Delete the selection from editor
+            self.editor.delete_selection();
+            self.cursor_position = self.editor.get_cursor_position();
+
+            // Sync the gap buffer with the editor's buffer
+            let lines = self.editor.get_buffer().all_lines();
+            self.buffer = GapBuffer::from_lines(lines);
+
+            // Update the editor content to refresh syntax highlighting
+            self.update_editor_content();
+            cx.notify();
+            println!("Selection cut and removed");
+        } else {
+            println!("No selection - cutting current line");
+            // No selection - cut the entire current line
+            let current_line = self.cursor_position.row;
+            let lines = self.buffer.all_lines();
+            let line_text = if current_line < lines.len() {
+                format!("{}\n", lines[current_line])
+            } else {
+                String::new()
+            };
+            println!("Cutting line {}: {:?}", current_line, line_text);
+
+            // Copy line to clipboard
+            cx.write_to_clipboard(ClipboardItem::new_string(line_text));
+
+            // Delete the line
+            let mut lines = self.buffer.all_lines();
+            if current_line < lines.len() {
+                lines.remove(current_line);
+                if lines.is_empty() {
+                    lines.push(String::new());
+                }
+
+                // Update buffer
+                self.buffer = GapBuffer::from_lines(lines.clone());
+
+                // Update cursor position
+                if self.cursor_position.row >= lines.len() && lines.len() > 0 {
+                    self.cursor_position.row = lines.len() - 1;
+                }
+                self.cursor_position.col = 0;
+
+                // Update editor
+                self.editor.update_buffer(lines);
+                self.editor.set_cursor_position(self.cursor_position);
+                cx.notify();
+                println!("Line cut complete");
+            }
+        }
+    }
+
+    fn paste(&mut self, _: &Paste, _window: &mut Window, cx: &mut Context<Self>) {
+        println!("Paste action triggered");
+        if let Some(clipboard_item) = cx.read_from_clipboard() {
+            println!("Got clipboard item");
+            if let Some(text) = clipboard_item.text() {
+                println!("Pasting text: {:?}", text);
+                self.insert_text(&text, cx);
+                cx.notify();
+                println!("Text pasted");
+            } else {
+                println!("Clipboard item has no text");
+            }
+        } else {
+            println!("No clipboard item found");
+        }
+    }
+
+    fn get_selected_text(&self, start: CursorPosition, end: CursorPosition) -> String {
+        let lines = self.buffer.all_lines();
+
+        if start.row == end.row {
+            // Selection within single line
+            let line = &lines[start.row];
+            line[start.col.min(line.len())..end.col.min(line.len())].to_string()
+        } else {
+            // Multi-line selection
+            let mut result = String::new();
+
+            // First line
+            let first_line = &lines[start.row];
+            result.push_str(&first_line[start.col.min(first_line.len())..]);
+            result.push('\n');
+
+            // Middle lines
+            for row in (start.row + 1)..end.row {
+                result.push_str(&lines[row]);
+                result.push('\n');
+            }
+
+            // Last line
+            let last_line = &lines[end.row];
+            result.push_str(&last_line[..end.col.min(last_line.len())]);
+
+            result
+        }
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
@@ -677,6 +813,10 @@ impl Render for EditorView {
                     .on_action(cx.listener(Self::delete))
                     .on_action(cx.listener(Self::insert_newline))
                     .on_action(cx.listener(Self::select_all))
+                    .on_action(cx.listener(Self::escape))
+                    .on_action(cx.listener(Self::copy))
+                    .on_action(cx.listener(Self::cut))
+                    .on_action(cx.listener(Self::paste))
                     .on_action(cx.listener(Self::next_theme))
                     .on_action(cx.listener(Self::previous_theme))
                     .on_action(cx.listener(Self::next_language))
@@ -716,8 +856,19 @@ impl Render for EditorView {
                                 self.cursor_position.col + 1
                             )))
                             .child(SharedString::from(" | "))
+                            .child(if self.editor.has_selection() {
+                                if let Some((start, end)) = self.editor.get_selection_range() {
+                                    let selected_text = self.get_selected_text(start, end);
+                                    SharedString::from(format!(" | {} chars selected", selected_text.len()))
+                                } else {
+                                    SharedString::from("")
+                                }
+                            } else {
+                                SharedString::from("")
+                            })
+                            .child(SharedString::from(" | "))
                             .child(SharedString::from(
-                                "Cmd+T/Shift+T: Theme | Cmd+L/Shift+L: Language",
+                                "Cmd+A: Select All | Cmd+C/X/V: Copy/Cut/Paste | Esc: Clear Selection",
                             )),
                     ),
             )
@@ -740,6 +891,10 @@ fn main() {
             KeyBinding::new("delete", Delete, None),
             KeyBinding::new("enter", InsertNewline, None),
             KeyBinding::new("cmd-a", SelectAll, None),
+            KeyBinding::new("escape", Escape, None),
+            KeyBinding::new("cmd-c", Copy, None),
+            KeyBinding::new("cmd-x", Cut, None),
+            KeyBinding::new("cmd-v", Paste, None),
             KeyBinding::new("cmd-t", NextTheme, None),
             KeyBinding::new("cmd-shift-t", PreviousTheme, None),
             KeyBinding::new("cmd-l", NextLanguage, None),

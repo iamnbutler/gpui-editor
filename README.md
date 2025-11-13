@@ -11,9 +11,8 @@ Building a standalone editor component is probably like trying to boil the ocean
 1. Just make it work for the simplest possible usecase, with the simplest possible approach (GapBuffer-based.)
 2. Split up the pieces that should be generic/shared with other components - likely split up into smaller crates to power this and [gpui-kit](https://github.com/iamnbutler/gpui-kit). Think `theme`, `utils`, `highlight`, etc.
 3. Start using in anger, leveling up testing, using in other projects, etc.
-4. Syntax highlighting (TextMate grammars via syntect)
-5. LSP support for code intelligence
-6. Level up the editing approach - Likely some mix of the current approach and [ropes, sumtree](https://zed.dev/blog/zed-decoded-rope-sumtree).
+4. Syntax highligting???? LSP???, ???
+5. Level up the editing approach - Likely some mix of the current approach and [ropes, sumtree](https://zed.dev/blog/zed-decoded-rope-sumtree).
 
 There are probably 800 missing steps in there, we'll just have to figure it out on the way.
 

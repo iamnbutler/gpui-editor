@@ -277,7 +277,10 @@ impl TextBuffer for GapBuffer {
     }
 
     fn get_line(&self, line_idx: usize) -> Option<&str> {
-        todo!("impl get_line")
+        // Note: GapBuffer cannot efficiently return &str for individual lines
+        // because the text may be split across the gap. Use all_lines() instead.
+        // Returning None to avoid panic.
+        None
     }
 
     fn all_lines(&self) -> Vec<String> {
