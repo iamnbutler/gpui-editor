@@ -63,7 +63,7 @@ impl Editor {
         for (i, line) in lines.iter().enumerate() {
             let line_bounds = self.line_bounds(i, bounds);
             self.paint_line_number(cx, window, i + 1, line_bounds, bounds);
-            self.paint_line_content(cx, window, line, line_bounds);
+            self.paint_line_content_with_highlighting(cx, window, line, i, line_bounds);
         }
     }
 
@@ -141,6 +141,43 @@ impl Editor {
             }],
             None,
         );
+
+        shaped_line
+            .paint(
+                point(text_x, line_bounds.origin.y),
+                self.config.line_height,
+                window,
+                cx,
+            )
+            .log_err();
+    }
+
+    pub fn paint_line_content_with_highlighting(
+        &mut self,
+        cx: &mut App,
+        window: &mut Window,
+        line: impl Into<SharedString>,
+        line_index: usize,
+        line_bounds: Bounds<Pixels>,
+    ) {
+        let gutter_padding = px(10.0);
+        let text_x = line_bounds.origin.x + gutter_padding;
+        let line = line.into();
+
+        // Get syntax highlighted text runs
+        let font_size_f32: f32 = self.config.font_size.into();
+        let text_runs = self.syntax_highlighter.highlight_line(
+            &line,
+            &self.language,
+            line_index,
+            self.config.font_family.clone(),
+            font_size_f32,
+        );
+
+        let shaped_line =
+            window
+                .text_system()
+                .shape_line(line.clone(), self.config.font_size, &text_runs, None);
 
         shaped_line
             .paint(

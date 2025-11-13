@@ -5,6 +5,7 @@ use std::ops::Range as StdRange;
 
 mod editor;
 mod gap_buffer;
+mod syntax_highlighter;
 mod text_buffer;
 use editor::{CursorPosition, Editor, EditorConfig};
 use gap_buffer::GapBuffer;
@@ -19,7 +20,11 @@ actions!(
         MoveRight,
         Backspace,
         Delete,
-        InsertNewline
+        InsertNewline,
+        NextTheme,
+        PreviousTheme,
+        NextLanguage,
+        PreviousLanguage
     ]
 );
 
@@ -27,12 +32,20 @@ struct EditorView {
     focus_handle: FocusHandle,
     buffer: GapBuffer,
     cursor_position: CursorPosition,
+    editor: editor::Editor,
+    current_theme_index: usize,
+    available_themes: Vec<String>,
+    current_language_index: usize,
+    available_languages: Vec<(String, String, String)>, // (name, extension, sample_code)
 }
 
 impl EditorView {
-    fn new(cx: &mut Context<Self>) -> Self {
-        let focus_handle = cx.focus_handle();
-        let initial_text = r#"use std::collections::HashMap;
+    fn get_sample_languages() -> Vec<(String, String, String)> {
+        vec![
+            (
+                "Rust".to_string(),
+                "rs".to_string(),
+                r#"use std::collections::HashMap;
 
 fn main() {
     println!("Hello, world!");
@@ -54,12 +67,249 @@ fn main() {
     scores.insert("Yellow", 50);
 
     println!("Final count: {}", count);
-}"#;
+}"#.to_string(),
+            ),
+            (
+                "JavaScript".to_string(),
+                "js".to_string(),
+                r#"// JavaScript sample code
+const express = require('express');
+const app = express();
+const port = 3000;
+
+// Define a route
+app.get('/', (req, res) => {
+    res.send('Hello World!');
+});
+
+// Async function example
+async function fetchData(url) {
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        console.log('Data:', data);
+        return data;
+    } catch (error) {
+        console.error('Error fetching data:', error);
+    }
+}
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
+});"#.to_string(),
+            ),
+            (
+                "Python".to_string(),
+                "py".to_string(),
+                r#"#!/usr/bin/env python3
+import asyncio
+import json
+from typing import List, Dict, Optional
+
+class DataProcessor:
+    """A sample data processing class."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.data: List[Dict] = []
+
+    def process(self, item: Dict) -> Optional[Dict]:
+        """Process a single data item."""
+        if not item:
+            return None
+
+        # Transform the data
+        result = {
+            'id': item.get('id', 0),
+            'processed_by': self.name,
+            'timestamp': item.get('timestamp'),
+            'value': item.get('value', 0) * 2
+        }
+
+        return result
+
+async def main():
+    """Main async function."""
+    processor = DataProcessor("Sample Processor")
+
+    # Sample data
+    items = [
+        {'id': 1, 'value': 10},
+        {'id': 2, 'value': 20},
+        {'id': 3, 'value': 30}
+    ]
+
+    for item in items:
+        result = processor.process(item)
+        print(f"Processed: {result}")
+
+    await asyncio.sleep(1)
+    print("Processing complete!")
+
+if __name__ == "__main__":
+    asyncio.run(main())"#.to_string(),
+            ),
+            (
+                "HTML".to_string(),
+                "html".to_string(),
+                r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sample HTML Page</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #5a67d8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to the Sample Page</h1>
+        <p>This is a sample HTML page with embedded CSS and JavaScript.</p>
+        <button onclick="showMessage()">Click Me!</button>
+        <div id="message"></div>
+    </div>
+
+    <script>
+        function showMessage() {
+            const messageDiv = document.getElementById('message');
+            messageDiv.innerHTML = '<p style="color: green;">Button clicked at ' + new Date().toLocaleTimeString() + '</p>';
+        }
+    </script>
+</body>
+</html>"#.to_string(),
+            ),
+            (
+                "Go".to_string(),
+                "go".to_string(),
+                r#"package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "log"
+    "net/http"
+    "time"
+)
+
+// User represents a user in the system
+type User struct {
+    ID        int       `json:"id"`
+    Name      string    `json:"name"`
+    Email     string    `json:"email"`
+    CreatedAt time.Time `json:"created_at"`
+}
+
+// UserService handles user-related operations
+type UserService struct {
+    users map[int]*User
+}
+
+// NewUserService creates a new UserService instance
+func NewUserService() *UserService {
+    return &UserService{
+        users: make(map[int]*User),
+    }
+}
+
+// GetUser retrieves a user by ID
+func (s *UserService) GetUser(id int) (*User, error) {
+    user, exists := s.users[id]
+    if !exists {
+        return nil, fmt.Errorf("user with ID %d not found", id)
+    }
+    return user, nil
+}
+
+func main() {
+    service := NewUserService()
+
+    // Sample user
+    user := &User{
+        ID:        1,
+        Name:      "John Doe",
+        Email:     "john@example.com",
+        CreatedAt: time.Now(),
+    }
+
+    service.users[user.ID] = user
+
+    // Start HTTP server
+    http.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(user)
+    })
+
+    fmt.Println("Server starting on :8080...")
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}"#.to_string(),
+            ),
+        ]
+    }
+
+    fn new(cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
+        let available_languages = Self::get_sample_languages();
+        let current_language_index = 0;
+
+        let (_, _, initial_text) = &available_languages[current_language_index];
+
+        let buffer = GapBuffer::from_text(&initial_text);
+        let lines = buffer.all_lines();
+
+        let mut editor = editor::Editor::new("editor", lines);
+        editor.set_language("Rust".to_string());
+
+        let available_themes = vec![
+            "Monokai".to_string(),
+            "base16-ocean.dark".to_string(),
+            "base16-ocean.light".to_string(),
+            "InspiredGitHub".to_string(),
+            "Solarized (dark)".to_string(),
+            "Solarized (light)".to_string(),
+        ];
+
+        editor.set_theme("Monokai");
 
         Self {
             focus_handle,
-            buffer: GapBuffer::from_text(initial_text),
+            buffer,
             cursor_position: CursorPosition { row: 0, col: 0 },
+            editor,
+            current_theme_index: 0,
+            available_themes,
+            current_language_index,
+            available_languages,
         }
     }
 
@@ -161,6 +411,72 @@ fn main() {
                 self.cursor_position.col += 1;
             }
         }
+
+        // Update editor with new buffer content
+        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
+        self.editor.set_language("Rust".to_string());
+        self.editor
+            .set_theme(&self.available_themes[self.current_theme_index]);
+        self.editor.set_cursor_position(self.cursor_position);
+    }
+
+    fn next_theme(&mut self, _: &NextTheme, _: &mut Window, cx: &mut Context<Self>) {
+        self.current_theme_index = (self.current_theme_index + 1) % self.available_themes.len();
+        self.editor
+            .set_theme(&self.available_themes[self.current_theme_index]);
+        cx.notify();
+    }
+
+    fn previous_theme(&mut self, _: &PreviousTheme, _: &mut Window, cx: &mut Context<Self>) {
+        if self.current_theme_index == 0 {
+            self.current_theme_index = self.available_themes.len() - 1;
+        } else {
+            self.current_theme_index -= 1;
+        }
+        self.editor
+            .set_theme(&self.available_themes[self.current_theme_index]);
+        cx.notify();
+    }
+
+    fn next_language(&mut self, _: &NextLanguage, _: &mut Window, cx: &mut Context<Self>) {
+        self.current_language_index =
+            (self.current_language_index + 1) % self.available_languages.len();
+        let (name, ext, sample_code) = &self.available_languages[self.current_language_index];
+
+        // Replace buffer with new sample code
+        self.buffer = GapBuffer::from_text(sample_code);
+        self.cursor_position = CursorPosition { row: 0, col: 0 };
+
+        // Update editor with new language
+        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
+        self.editor.set_language(name.clone());
+        self.editor
+            .set_theme(&self.available_themes[self.current_theme_index]);
+        self.editor.set_cursor_position(self.cursor_position);
+
+        cx.notify();
+    }
+
+    fn previous_language(&mut self, _: &PreviousLanguage, _: &mut Window, cx: &mut Context<Self>) {
+        if self.current_language_index == 0 {
+            self.current_language_index = self.available_languages.len() - 1;
+        } else {
+            self.current_language_index -= 1;
+        }
+        let (name, ext, sample_code) = &self.available_languages[self.current_language_index];
+
+        // Replace buffer with new sample code
+        self.buffer = GapBuffer::from_text(sample_code);
+        self.cursor_position = CursorPosition { row: 0, col: 0 };
+
+        // Update editor with new language
+        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
+        self.editor.set_language(name.clone());
+        self.editor
+            .set_theme(&self.available_themes[self.current_theme_index]);
+        self.editor.set_cursor_position(self.cursor_position);
+
+        cx.notify();
     }
 }
 
@@ -275,24 +591,76 @@ impl EntityInputHandler for EditorView {
 
 impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let editor_element = Editor::new("editor", self.buffer.all_lines())
-            .config(EditorConfig::default())
-            .cursor_position(self.cursor_position);
+        // Update editor with current buffer state
+        let (language_name, _, _) = &self.available_languages[self.current_language_index];
+        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
+        self.editor.set_language(language_name.clone());
+        self.editor
+            .set_theme(&self.available_themes[self.current_theme_index]);
+        self.editor.set_cursor_position(self.cursor_position);
+
+        let current_theme = &self.available_themes[self.current_theme_index];
+        let (current_language, _, _) = &self.available_languages[self.current_language_index];
 
         div()
             .size_full()
-            .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::move_up))
-            .on_action(cx.listener(Self::move_down))
-            .on_action(cx.listener(Self::move_left))
-            .on_action(cx.listener(Self::move_right))
-            .on_action(cx.listener(Self::backspace))
-            .on_action(cx.listener(Self::delete))
-            .on_action(cx.listener(Self::insert_newline))
-            .child(EditorElement {
-                entity: cx.entity().clone(),
-                editor_element,
-            })
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_grow()
+                    .track_focus(&self.focus_handle)
+                    .on_action(cx.listener(Self::move_up))
+                    .on_action(cx.listener(Self::move_down))
+                    .on_action(cx.listener(Self::move_left))
+                    .on_action(cx.listener(Self::move_right))
+                    .on_action(cx.listener(Self::backspace))
+                    .on_action(cx.listener(Self::delete))
+                    .on_action(cx.listener(Self::insert_newline))
+                    .on_action(cx.listener(Self::next_theme))
+                    .on_action(cx.listener(Self::previous_theme))
+                    .on_action(cx.listener(Self::next_language))
+                    .on_action(cx.listener(Self::previous_language))
+                    .child(EditorElement {
+                        entity: cx.entity().clone(),
+                        editor_element: self.editor.clone(),
+                    }),
+            )
+            .child(
+                // Status bar
+                div()
+                    .h(px(24.0))
+                    .w_full()
+                    .bg(rgb(0x2b2b2b))
+                    .border_t_1()
+                    .border_color(rgb(0x3c3c3c))
+                    .flex()
+                    .items_center()
+                    .px_3()
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .text_sm()
+                            .text_color(rgb(0xaaaaaa))
+                            .child(SharedString::from(format!("Theme: {}", current_theme)))
+                            .child(SharedString::from(" | "))
+                            .child(SharedString::from(format!(
+                                "Language: {}",
+                                current_language
+                            )))
+                            .child(SharedString::from(" | "))
+                            .child(SharedString::from(format!(
+                                "Ln {}, Col {}",
+                                self.cursor_position.row + 1,
+                                self.cursor_position.col + 1
+                            )))
+                            .child(SharedString::from(" | "))
+                            .child(SharedString::from(
+                                "Cmd+T/Shift+T: Theme | Cmd+L/Shift+L: Language",
+                            )),
+                    ),
+            )
     }
 }
 
@@ -307,6 +675,10 @@ fn main() {
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
             KeyBinding::new("enter", InsertNewline, None),
+            KeyBinding::new("cmd-t", NextTheme, None),
+            KeyBinding::new("cmd-shift-t", PreviousTheme, None),
+            KeyBinding::new("cmd-l", NextLanguage, None),
+            KeyBinding::new("cmd-shift-l", PreviousLanguage, None),
         ]);
 
         cx.open_window(
@@ -410,13 +782,13 @@ impl Element for EditorElement {
 
             if bounds.contains(&mouse_down.position) {
                 entity.update(cx, |view, cx| {
-                    // Create editor with current state to calculate cursor position
-                    let mut editor = Editor::new("temp", view.buffer.all_lines())
-                        .config(EditorConfig::default())
-                        .cursor_position(view.cursor_position);
+                    // Use the view's editor to calculate cursor position
+                    let new_cursor =
+                        view.editor
+                            .position_to_cursor(mouse_down.position, bounds, window);
 
-                    let new_cursor = editor.position_to_cursor(mouse_down.position, bounds, window);
                     view.cursor_position = new_cursor;
+                    view.editor.set_cursor_position(new_cursor);
 
                     // Focus the editor when clicked
                     window.focus(&view.focus_handle);

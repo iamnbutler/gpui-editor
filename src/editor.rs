@@ -3,6 +3,7 @@ use gpui_util::ResultExt;
 
 mod paint;
 
+use crate::syntax_highlighter::SyntaxHighlighter;
 use crate::text_buffer::{SimpleBuffer, TextBuffer};
 
 #[derive(Clone)]
@@ -42,21 +43,34 @@ pub struct CursorPosition {
     pub col: usize,
 }
 
+#[derive(Clone)]
 pub struct Editor {
     id: ElementId,
     buffer: SimpleBuffer,
     config: EditorConfig,
     cursor_position: CursorPosition,
+    syntax_highlighter: SyntaxHighlighter,
+    language: String,
 }
 
 impl Editor {
     pub fn new(id: impl Into<ElementId>, lines: Vec<String>) -> Self {
         let id = id.into();
+        let mut syntax_highlighter = SyntaxHighlighter::new();
+
+        // Auto-detect language from content
+        let full_text = lines.join("\n");
+        let language = syntax_highlighter
+            .detect_language(&full_text, Some("rs"))
+            .unwrap_or_else(|| "Rust".to_string());
+
         Self {
             id,
             buffer: SimpleBuffer::new(lines),
             config: EditorConfig::default(),
             cursor_position: CursorPosition { row: 0, col: 0 },
+            syntax_highlighter,
+            language,
         }
     }
 
@@ -72,6 +86,20 @@ impl Editor {
 
     pub fn set_cursor_position(&mut self, position: CursorPosition) {
         self.cursor_position = position;
+    }
+
+    pub fn set_language(&mut self, language: String) {
+        self.language = language;
+    }
+
+    pub fn set_theme(&mut self, theme: &str) {
+        self.syntax_highlighter.set_theme(theme);
+        // Update colors from theme
+        self.config.editor_bg_color = self.syntax_highlighter.get_theme_background().into();
+        self.config.text_color = self.syntax_highlighter.get_theme_foreground().into();
+        self.config.gutter_bg_color = self.syntax_highlighter.get_theme_gutter_background().into();
+        self.config.active_line_bg_color =
+            self.syntax_highlighter.get_theme_line_highlight().into();
     }
 
     pub fn move_left(&mut self) {

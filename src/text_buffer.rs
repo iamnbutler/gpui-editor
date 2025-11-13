@@ -27,6 +27,7 @@ pub trait TextBuffer {
 }
 
 /// Simple implementation that wraps a Vec<String>
+#[derive(Clone)]
 pub struct SimpleBuffer {
     lines: Vec<String>,
 }
