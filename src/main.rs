@@ -18,13 +18,18 @@ actions!(
         MoveDown,
         MoveLeft,
         MoveRight,
+        MoveUpWithShift,
+        MoveDownWithShift,
+        MoveLeftWithShift,
+        MoveRightWithShift,
         Backspace,
         Delete,
         InsertNewline,
         NextTheme,
         PreviousTheme,
         NextLanguage,
-        PreviousLanguage
+        PreviousLanguage,
+        SelectAll
     ]
 );
 
@@ -315,54 +320,84 @@ func main() {
     }
 
     fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
-        if self.cursor_position.row > 0 {
-            self.cursor_position.row -= 1;
-            // Clamp column to line length
-            let line_len = self.buffer.line_len(self.cursor_position.row);
-            self.cursor_position.col = self.cursor_position.col.min(line_len);
-            self.editor.set_cursor_position(self.cursor_position);
-            cx.notify();
-        }
+        self.editor.move_up(false);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
     }
 
     fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
-        if self.cursor_position.row < self.buffer.line_count().saturating_sub(1) {
-            self.cursor_position.row += 1;
-            // Clamp column to line length
-            let line_len = self.buffer.line_len(self.cursor_position.row);
-            self.cursor_position.col = self.cursor_position.col.min(line_len);
-            self.editor.set_cursor_position(self.cursor_position);
-            cx.notify();
-        }
+        self.editor.move_down(false);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
     }
 
     fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
-        if self.cursor_position.col > 0 {
-            self.cursor_position.col -= 1;
-        } else if self.cursor_position.row > 0 {
-            // Move to end of previous line
-            self.cursor_position.row -= 1;
-            self.cursor_position.col = self.buffer.line_len(self.cursor_position.row);
-        }
-        self.editor.set_cursor_position(self.cursor_position);
+        self.editor.move_left(false);
+        self.cursor_position = self.editor.get_cursor_position();
         cx.notify();
     }
 
     fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
-        let current_line_len = self.buffer.line_len(self.cursor_position.row);
+        self.editor.move_right(false);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
+    }
 
-        if self.cursor_position.col < current_line_len {
-            self.cursor_position.col += 1;
-        } else if self.cursor_position.row < self.buffer.line_count().saturating_sub(1) {
-            // Move to start of next line
-            self.cursor_position.row += 1;
-            self.cursor_position.col = 0;
-        }
-        self.editor.set_cursor_position(self.cursor_position);
+    fn move_up_with_shift(&mut self, _: &MoveUpWithShift, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.move_up(true);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
+    }
+
+    fn move_down_with_shift(
+        &mut self,
+        _: &MoveDownWithShift,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.move_down(true);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
+    }
+
+    fn move_left_with_shift(
+        &mut self,
+        _: &MoveLeftWithShift,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.move_left(true);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
+    }
+
+    fn move_right_with_shift(
+        &mut self,
+        _: &MoveRightWithShift,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.move_right(true);
+        self.cursor_position = self.editor.get_cursor_position();
+        cx.notify();
+    }
+
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.editor.select_all();
+        self.cursor_position = self.editor.get_cursor_position();
         cx.notify();
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        // First check if there's a selection to delete
+        if self.editor.has_selection() {
+            self.editor.delete_selection();
+            self.cursor_position = self.editor.get_cursor_position();
+            self.update_editor_content();
+            cx.notify();
+            return;
+        }
+
         // Move gap to cursor position
         let pos = self
             .buffer
@@ -384,6 +419,15 @@ func main() {
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        // First check if there's a selection to delete
+        if self.editor.has_selection() {
+            self.editor.delete_selection();
+            self.cursor_position = self.editor.get_cursor_position();
+            self.update_editor_content();
+            cx.notify();
+            return;
+        }
+
         // Move gap to cursor position
         let pos = self
             .buffer
@@ -403,6 +447,15 @@ func main() {
     }
 
     fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        // First check if there's a selection to delete
+        if self.editor.has_selection() {
+            self.editor.delete_selection();
+            self.cursor_position = self.editor.get_cursor_position();
+            // Update buffer from editor after deletion
+            let lines = self.editor.get_buffer().all_lines();
+            self.buffer = GapBuffer::from_lines(lines);
+        }
+
         // Move gap to cursor position
         let pos = self
             .buffer
@@ -616,9 +669,14 @@ impl Render for EditorView {
                     .on_action(cx.listener(Self::move_down))
                     .on_action(cx.listener(Self::move_left))
                     .on_action(cx.listener(Self::move_right))
+                    .on_action(cx.listener(Self::move_up_with_shift))
+                    .on_action(cx.listener(Self::move_down_with_shift))
+                    .on_action(cx.listener(Self::move_left_with_shift))
+                    .on_action(cx.listener(Self::move_right_with_shift))
                     .on_action(cx.listener(Self::backspace))
                     .on_action(cx.listener(Self::delete))
                     .on_action(cx.listener(Self::insert_newline))
+                    .on_action(cx.listener(Self::select_all))
                     .on_action(cx.listener(Self::next_theme))
                     .on_action(cx.listener(Self::previous_theme))
                     .on_action(cx.listener(Self::next_language))
@@ -674,9 +732,14 @@ fn main() {
             KeyBinding::new("down", MoveDown, None),
             KeyBinding::new("left", MoveLeft, None),
             KeyBinding::new("right", MoveRight, None),
+            KeyBinding::new("shift-up", MoveUpWithShift, None),
+            KeyBinding::new("shift-down", MoveDownWithShift, None),
+            KeyBinding::new("shift-left", MoveLeftWithShift, None),
+            KeyBinding::new("shift-right", MoveRightWithShift, None),
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
             KeyBinding::new("enter", InsertNewline, None),
+            KeyBinding::new("cmd-a", SelectAll, None),
             KeyBinding::new("cmd-t", NextTheme, None),
             KeyBinding::new("cmd-shift-t", PreviousTheme, None),
             KeyBinding::new("cmd-l", NextLanguage, None),
@@ -791,6 +854,9 @@ impl Element for EditorElement {
 
                     view.cursor_position = new_cursor;
                     view.editor.set_cursor_position(new_cursor);
+
+                    // Clear selection when clicking (TODO: check shift modifier later)
+                    view.editor.clear_selection();
 
                     // Focus the editor when clicked
                     window.focus(&view.focus_handle);

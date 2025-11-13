@@ -49,6 +49,7 @@ pub struct Editor {
     buffer: SimpleBuffer,
     config: EditorConfig,
     cursor_position: CursorPosition,
+    selection_anchor: Option<CursorPosition>,
     syntax_highlighter: SyntaxHighlighter,
     language: String,
     current_theme: String,
@@ -70,6 +71,7 @@ impl Editor {
             buffer: SimpleBuffer::new(lines),
             config: EditorConfig::default(),
             cursor_position: CursorPosition { row: 0, col: 0 },
+            selection_anchor: None,
             syntax_highlighter,
             language,
             current_theme: String::new(),
@@ -88,6 +90,18 @@ impl Editor {
 
     pub fn set_cursor_position(&mut self, position: CursorPosition) {
         self.cursor_position = position;
+    }
+
+    pub fn get_cursor_position(&self) -> CursorPosition {
+        self.cursor_position
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection_anchor = None;
+    }
+
+    pub fn get_buffer(&self) -> &SimpleBuffer {
+        &self.buffer
     }
 
     pub fn set_language(&mut self, language: String) {
@@ -125,7 +139,13 @@ impl Editor {
         }
     }
 
-    pub fn move_left(&mut self) {
+    pub fn move_left(&mut self, shift_held: bool) {
+        if shift_held && self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor_position);
+        } else if !shift_held {
+            self.selection_anchor = None;
+        }
+
         if self.cursor_position.col > 0 {
             self.cursor_position.col -= 1;
         } else if self.cursor_position.row > 0 {
@@ -135,7 +155,13 @@ impl Editor {
         }
     }
 
-    pub fn move_right(&mut self) {
+    pub fn move_right(&mut self, shift_held: bool) {
+        if shift_held && self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor_position);
+        } else if !shift_held {
+            self.selection_anchor = None;
+        }
+
         let current_line_len = self.buffer.line_len(self.cursor_position.row);
 
         if self.cursor_position.col < current_line_len {
@@ -147,7 +173,13 @@ impl Editor {
         }
     }
 
-    pub fn move_up(&mut self) {
+    pub fn move_up(&mut self, shift_held: bool) {
+        if shift_held && self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor_position);
+        } else if !shift_held {
+            self.selection_anchor = None;
+        }
+
         if self.cursor_position.row > 0 {
             self.cursor_position.row -= 1;
             // Clamp column to line length
@@ -156,12 +188,88 @@ impl Editor {
         }
     }
 
-    pub fn move_down(&mut self) {
+    pub fn move_down(&mut self, shift_held: bool) {
+        if shift_held && self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor_position);
+        } else if !shift_held {
+            self.selection_anchor = None;
+        }
+
         if self.cursor_position.row < self.buffer.line_count().saturating_sub(1) {
             self.cursor_position.row += 1;
             // Clamp column to line length
             let line_len = self.buffer.line_len(self.cursor_position.row);
             self.cursor_position.col = self.cursor_position.col.min(line_len);
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        // Set anchor at beginning
+        self.selection_anchor = Some(CursorPosition { row: 0, col: 0 });
+
+        // Move cursor to end
+        let last_row = self.buffer.line_count().saturating_sub(1);
+        let last_col = self.buffer.line_len(last_row);
+        self.cursor_position = CursorPosition {
+            row: last_row,
+            col: last_col,
+        };
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.selection_anchor.is_some()
+    }
+
+    pub fn get_selection_range(&self) -> Option<(CursorPosition, CursorPosition)> {
+        self.selection_anchor.map(|anchor| {
+            // Return (start, end) positions in document order
+            if anchor.row < self.cursor_position.row
+                || (anchor.row == self.cursor_position.row && anchor.col < self.cursor_position.col)
+            {
+                (anchor, self.cursor_position)
+            } else {
+                (self.cursor_position, anchor)
+            }
+        })
+    }
+
+    pub fn delete_selection(&mut self) -> bool {
+        if let Some((start, end)) = self.get_selection_range() {
+            // Get all lines
+            let mut lines = self.buffer.all_lines();
+
+            if start.row == end.row {
+                // Selection within a single line
+                let line = &mut lines[start.row];
+                let new_line = format!(
+                    "{}{}",
+                    &line[..start.col.min(line.len())],
+                    &line[end.col.min(line.len())..]
+                );
+                lines[start.row] = new_line;
+            } else {
+                // Selection spans multiple lines
+                let first_line = &lines[start.row];
+                let last_line = &lines[end.row];
+                let new_line = format!(
+                    "{}{}",
+                    &first_line[..start.col.min(first_line.len())],
+                    &last_line[end.col.min(last_line.len())..]
+                );
+
+                // Remove lines in between and replace first line
+                lines.splice(start.row..=end.row, vec![new_line]);
+            }
+
+            // Update buffer and cursor
+            self.buffer = SimpleBuffer::new(lines);
+            self.cursor_position = start;
+            self.selection_anchor = None;
+            self.syntax_highlighter.reset_state();
+
+            true
+        } else {
+            false
         }
     }
 
@@ -445,6 +553,9 @@ impl gpui::Element for Editor {
 
         // underlay
         self.paint_active_line_background(window, bounds);
+
+        // selection
+        self.paint_selection(window, bounds);
 
         // content
         self.paint_lines(cx, window, bounds);

@@ -58,6 +58,97 @@ impl Editor {
         }
     }
 
+    pub fn paint_selection(&mut self, window: &mut Window, bounds: Bounds<Pixels>) {
+        if let Some((start, end)) = self.get_selection_range() {
+            let selection_color = rgba(0x264f78ff); // Blue selection color
+
+            // Paint selection for each line in the range
+            for row in start.row..=end.row {
+                if let Some(line) = self.buffer.get_line(row) {
+                    let line_bounds = self.line_bounds(row, bounds);
+
+                    // Calculate start and end columns for this line
+                    let start_col = if row == start.row { start.col } else { 0 };
+                    let end_col = if row == end.row { end.col } else { line.len() };
+
+                    // Calculate pixel positions for the selection
+                    let text_x_start = line_bounds.origin.x + self.config.gutter_padding;
+
+                    // Measure text up to start position
+                    let start_x = if start_col > 0 {
+                        let text_before =
+                            SharedString::from(line[..start_col.min(line.len())].to_string());
+                        let shaped = window.text_system().shape_line(
+                            text_before.clone(),
+                            self.config.font_size,
+                            &[TextRun {
+                                len: text_before.len(),
+                                font: Font {
+                                    family: self.config.font_family.clone(),
+                                    features: Default::default(),
+                                    weight: FontWeight::NORMAL,
+                                    style: FontStyle::Normal,
+                                    fallbacks: Default::default(),
+                                },
+                                color: self.config.text_color.into(),
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            }],
+                            None,
+                        );
+                        shaped.width
+                    } else {
+                        px(0.0)
+                    };
+
+                    // Measure text up to end position
+                    let end_x = if end_col > 0 {
+                        let text_to_end =
+                            SharedString::from(line[..end_col.min(line.len())].to_string());
+                        let shaped = window.text_system().shape_line(
+                            text_to_end.clone(),
+                            self.config.font_size,
+                            &[TextRun {
+                                len: text_to_end.len(),
+                                font: Font {
+                                    family: self.config.font_family.clone(),
+                                    features: Default::default(),
+                                    weight: FontWeight::NORMAL,
+                                    style: FontStyle::Normal,
+                                    fallbacks: Default::default(),
+                                },
+                                color: self.config.text_color.into(),
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            }],
+                            None,
+                        );
+                        shaped.width
+                    } else {
+                        px(0.0)
+                    };
+
+                    // Paint selection rectangle
+                    let selection_bounds = Bounds {
+                        origin: point(text_x_start + start_x, line_bounds.origin.y),
+                        size: size(end_x - start_x, self.config.line_height),
+                    };
+
+                    window.paint_quad(PaintQuad {
+                        bounds: selection_bounds,
+                        corner_radii: (0.0).into(),
+                        background: selection_color.into(),
+                        border_color: transparent_black(),
+                        border_widths: (0.0).into(),
+                        border_style: BorderStyle::Solid,
+                    });
+                }
+            }
+        }
+    }
+
     pub fn paint_lines(&mut self, cx: &mut App, window: &mut Window, bounds: Bounds<Pixels>) {
         let lines = self.buffer.all_lines();
         for (i, line) in lines.iter().enumerate() {
