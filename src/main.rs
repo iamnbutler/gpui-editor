@@ -320,6 +320,7 @@ func main() {
             // Clamp column to line length
             let line_len = self.buffer.line_len(self.cursor_position.row);
             self.cursor_position.col = self.cursor_position.col.min(line_len);
+            self.editor.set_cursor_position(self.cursor_position);
             cx.notify();
         }
     }
@@ -330,6 +331,7 @@ func main() {
             // Clamp column to line length
             let line_len = self.buffer.line_len(self.cursor_position.row);
             self.cursor_position.col = self.cursor_position.col.min(line_len);
+            self.editor.set_cursor_position(self.cursor_position);
             cx.notify();
         }
     }
@@ -342,6 +344,7 @@ func main() {
             self.cursor_position.row -= 1;
             self.cursor_position.col = self.buffer.line_len(self.cursor_position.row);
         }
+        self.editor.set_cursor_position(self.cursor_position);
         cx.notify();
     }
 
@@ -355,6 +358,7 @@ func main() {
             self.cursor_position.row += 1;
             self.cursor_position.col = 0;
         }
+        self.editor.set_cursor_position(self.cursor_position);
         cx.notify();
     }
 
@@ -551,6 +555,8 @@ impl EntityInputHandler for EditorView {
         self.cursor_position.row = row;
         self.cursor_position.col = col;
 
+        // Update editor content to show the changes
+        self.update_editor_content();
         cx.notify();
     }
 
