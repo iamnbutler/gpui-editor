@@ -51,6 +51,7 @@ pub struct Editor {
     cursor_position: CursorPosition,
     syntax_highlighter: SyntaxHighlighter,
     language: String,
+    current_theme: String,
 }
 
 impl Editor {
@@ -71,6 +72,7 @@ impl Editor {
             cursor_position: CursorPosition { row: 0, col: 0 },
             syntax_highlighter,
             language,
+            current_theme: String::new(),
         }
     }
 
@@ -93,6 +95,7 @@ impl Editor {
     }
 
     pub fn set_theme(&mut self, theme: &str) {
+        self.current_theme = theme.to_string();
         self.syntax_highlighter.set_theme(theme);
         // Update colors from theme
         self.config.editor_bg_color = self.syntax_highlighter.get_theme_background().into();
@@ -100,6 +103,26 @@ impl Editor {
         self.config.gutter_bg_color = self.syntax_highlighter.get_theme_gutter_background().into();
         self.config.active_line_bg_color =
             self.syntax_highlighter.get_theme_line_highlight().into();
+    }
+
+    pub fn update_buffer(&mut self, lines: Vec<String>) {
+        self.buffer = SimpleBuffer::new(lines);
+        // Reset highlighting state to force complete re-highlighting
+        // This is more efficient than recreating the highlighter
+        self.syntax_highlighter.reset_state();
+    }
+
+    /// Update buffer content at a specific line (for future incremental updates)
+    pub fn update_line(&mut self, line_index: usize, new_content: String) {
+        // Get all lines, update the specific one, then recreate buffer
+        let mut lines = self.buffer.all_lines();
+        if line_index < lines.len() {
+            lines[line_index] = new_content;
+            self.buffer = SimpleBuffer::new(lines);
+            // Clear highlighting state from this line onward
+            self.syntax_highlighter
+                .clear_state_from_line(line_index, &self.language);
+        }
     }
 
     pub fn move_left(&mut self) {

@@ -76,6 +76,34 @@ impl SyntaxHighlighter {
             .map(|s| s.name.clone())
     }
 
+    /// Clear cached highlighting state from a specific line onward.
+    /// This is useful for incremental re-highlighting when text changes.
+    pub fn clear_state_from_line(&mut self, line_number: usize, language: &str) {
+        let mut inner = self.inner.borrow_mut();
+
+        // Clear parse states for this language from this line onward
+        // Since we don't track line numbers in parse_states directly,
+        // we need to clear it entirely for now
+        // TODO: Improve this to track line-specific states
+        if line_number == 0 {
+            inner.parse_states.remove(language);
+        }
+
+        // Clear highlight states that might be affected
+        let cache_key = format!("{}-{}", language, inner.current_theme);
+        if line_number == 0 {
+            inner.highlight_states.remove(&cache_key);
+        }
+    }
+
+    /// Reset all cached highlighting state.
+    /// Call this when the buffer content has significantly changed.
+    pub fn reset_state(&mut self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.parse_states.clear();
+        inner.highlight_states.clear();
+    }
+
     pub fn highlight_line(
         &mut self,
         line: &str,

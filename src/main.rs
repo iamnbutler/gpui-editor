@@ -374,6 +374,8 @@ func main() {
             self.cursor_position.col = self.buffer.line_len(self.cursor_position.row);
         }
 
+        // Update editor content
+        self.update_editor_content();
         cx.notify();
     }
 
@@ -385,6 +387,8 @@ func main() {
         self.buffer.move_gap_to(pos);
         self.buffer.delete_forward();
 
+        // Update editor content
+        self.update_editor_content();
         cx.notify();
     }
 
@@ -414,11 +418,7 @@ func main() {
         }
 
         // Update editor with new buffer content
-        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
-        self.editor.set_language("Rust".to_string());
-        self.editor
-            .set_theme(&self.available_themes[self.current_theme_index]);
-        self.editor.set_cursor_position(self.cursor_position);
+        self.update_editor_content();
     }
 
     fn next_theme(&mut self, _: &NextTheme, _: &mut Window, cx: &mut Context<Self>) {
@@ -449,10 +449,8 @@ func main() {
         self.cursor_position = CursorPosition { row: 0, col: 0 };
 
         // Update editor with new language
-        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
+        self.editor.update_buffer(self.buffer.all_lines());
         self.editor.set_language(name.clone());
-        self.editor
-            .set_theme(&self.available_themes[self.current_theme_index]);
         self.editor.set_cursor_position(self.cursor_position);
 
         cx.notify();
@@ -471,13 +469,17 @@ func main() {
         self.cursor_position = CursorPosition { row: 0, col: 0 };
 
         // Update editor with new language
-        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
+        self.editor.update_buffer(self.buffer.all_lines());
         self.editor.set_language(name.clone());
-        self.editor
-            .set_theme(&self.available_themes[self.current_theme_index]);
         self.editor.set_cursor_position(self.cursor_position);
 
         cx.notify();
+    }
+
+    fn update_editor_content(&mut self) {
+        // Update the editor's buffer without recreating it
+        self.editor.update_buffer(self.buffer.all_lines());
+        self.editor.set_cursor_position(self.cursor_position);
     }
 }
 
@@ -567,6 +569,7 @@ impl EntityInputHandler for EditorView {
             let (row, col) = self.buffer.position_to_cursor(selection.start);
             self.cursor_position.row = row;
             self.cursor_position.col = col;
+            self.update_editor_content();
         }
     }
 
@@ -592,14 +595,7 @@ impl EntityInputHandler for EditorView {
 
 impl Render for EditorView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Update editor with current buffer state
-        let (language_name, _, _) = &self.available_languages[self.current_language_index];
-        self.editor = editor::Editor::new("editor", self.buffer.all_lines());
-        self.editor.set_language(language_name.clone());
-        self.editor
-            .set_theme(&self.available_themes[self.current_theme_index]);
-        self.editor.set_cursor_position(self.cursor_position);
-
+        // Don't recreate editor on every render - it's already up to date
         let current_theme = &self.available_themes[self.current_theme_index];
         let (current_language, _, _) = &self.available_languages[self.current_language_index];
 
