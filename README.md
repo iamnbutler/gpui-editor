@@ -8,10 +8,10 @@ A open editor component for gpui – aspires to a Monaco-equivalent for gpui
 
 Building a standalone editor component is probably like trying to boil the ocean... so I'll be trying to break it down into some smaller steps.
 
-1. ✅ Just make it work for the simplest possible usecase, with the simplest possible approach (GapBuffer-based.)
+1. Just make it work for the simplest possible usecase, with the simplest possible approach (GapBuffer-based.)
 2. Split up the pieces that should be generic/shared with other components - likely split up into smaller crates to power this and [gpui-kit](https://github.com/iamnbutler/gpui-kit). Think `theme`, `utils`, `highlight`, etc.
 3. Start using in anger, leveling up testing, using in other projects, etc.
-4. ✅ Syntax highlighting (TextMate grammars via syntect)
+4. Syntax highlighting (TextMate grammars via syntect)
 5. LSP support for code intelligence
 6. Level up the editing approach - Likely some mix of the current approach and [ropes, sumtree](https://zed.dev/blog/zed-decoded-rope-sumtree).
 
