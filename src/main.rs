@@ -398,8 +398,7 @@ func main() {
 
     fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
         self.insert_text("\n", cx);
-        self.cursor_position.row += 1;
-        self.cursor_position.col = 0;
+        // cursor position is already updated by insert_text
         cx.notify();
     }
 

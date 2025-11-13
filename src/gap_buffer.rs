@@ -196,7 +196,18 @@ impl GapBuffer {
         if text.is_empty() {
             vec![String::new()]
         } else {
-            text.lines().map(|s| s.to_string()).collect()
+            // Split by newline, preserving empty lines at the end
+            let mut lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+
+            // If text doesn't end with newline, we're done
+            // If it does end with newline, split will have added the empty line already
+
+            // Ensure at least one line
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+
+            lines
         }
     }
 
@@ -205,11 +216,15 @@ impl GapBuffer {
         let text = self.to_string();
         let mut pos = 0;
 
-        for (i, line) in text.lines().enumerate() {
+        let lines: Vec<&str> = text.split('\n').collect();
+        for (i, line) in lines.iter().enumerate() {
             if i == row {
                 return pos + col.min(line.len());
             }
-            pos += line.len() + 1; // +1 for newline
+            pos += line.len();
+            if i < lines.len() - 1 {
+                pos += 1; // +1 for newline (except on last line)
+            }
         }
 
         pos
@@ -221,18 +236,22 @@ impl GapBuffer {
         let pos = pos.min(text.len());
 
         let mut current_pos = 0;
-        for (row, line) in text.lines().enumerate() {
+        let lines: Vec<&str> = text.split('\n').collect();
+
+        for (row, line) in lines.iter().enumerate() {
             let line_end = current_pos + line.len();
 
             if pos <= line_end {
                 return (row, pos - current_pos);
             }
 
-            current_pos = line_end + 1; // +1 for newline
+            current_pos = line_end;
+            if row < lines.len() - 1 {
+                current_pos += 1; // +1 for newline (except on last line)
+            }
         }
 
         // If we're at the very end
-        let lines: Vec<&str> = text.lines().collect();
         if lines.is_empty() {
             (0, 0)
         } else {
@@ -253,7 +272,7 @@ impl TextBuffer for GapBuffer {
         if text.is_empty() {
             1
         } else {
-            text.lines().count().max(1)
+            text.split('\n').count().max(1)
         }
     }
 
@@ -291,6 +310,77 @@ impl TextBuffer for GapBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_line_splitting_with_newlines() {
+        let mut buffer = GapBuffer::from_text("foo\nbar\nbaz");
+        let lines = buffer.all_lines();
+        assert_eq!(lines, vec!["foo", "bar", "baz"]);
+
+        // Test with trailing newline
+        let mut buffer = GapBuffer::from_text("foo\n");
+        let lines = buffer.all_lines();
+        assert_eq!(
+            lines,
+            vec!["foo", ""],
+            "Should have empty line after trailing newline"
+        );
+
+        // Test with multiple trailing newlines
+        let mut buffer = GapBuffer::from_text("foo\n\n");
+        let lines = buffer.all_lines();
+        assert_eq!(
+            lines,
+            vec!["foo", "", ""],
+            "Should have two empty lines after two newlines"
+        );
+
+        // Test empty buffer
+        let mut buffer = GapBuffer::from_text("");
+        let lines = buffer.all_lines();
+        assert_eq!(lines, vec![""], "Empty buffer should have one empty line");
+    }
+
+    #[test]
+    fn test_cursor_position_conversion() {
+        let buffer = GapBuffer::from_text("foo\nbar\nbaz");
+
+        // Test cursor to position
+        assert_eq!(buffer.cursor_to_position(0, 0), 0);
+        assert_eq!(buffer.cursor_to_position(0, 3), 3);
+        assert_eq!(buffer.cursor_to_position(1, 0), 4);
+        assert_eq!(buffer.cursor_to_position(1, 3), 7);
+        assert_eq!(buffer.cursor_to_position(2, 0), 8);
+
+        // Test position to cursor
+        assert_eq!(buffer.position_to_cursor(0), (0, 0));
+        assert_eq!(buffer.position_to_cursor(3), (0, 3));
+        assert_eq!(buffer.position_to_cursor(4), (1, 0));
+        assert_eq!(buffer.position_to_cursor(7), (1, 3));
+        assert_eq!(buffer.position_to_cursor(8), (2, 0));
+    }
+
+    #[test]
+    fn test_newline_insertion() {
+        let mut buffer = GapBuffer::from_text("foo\nbar");
+
+        // Insert newline in middle of first line
+        buffer.insert(2, "\n");
+        assert_eq!(buffer.to_string(), "fo\no\nbar");
+        let lines = buffer.all_lines();
+        assert_eq!(lines, vec!["fo", "o", "bar"]);
+
+        // Insert newline at end
+        let mut buffer = GapBuffer::from_text("foo");
+        buffer.insert(3, "\n");
+        assert_eq!(buffer.to_string(), "foo\n");
+        let lines = buffer.all_lines();
+        assert_eq!(
+            lines,
+            vec!["foo", ""],
+            "Should have empty line after newline at end"
+        );
+    }
     use crate::text_buffer::TextBuffer;
 
     #[test]
@@ -805,7 +895,7 @@ mod tests {
         let large_text = "Line\n".repeat(1000);
         let mut buffer = GapBuffer::from_text(&large_text);
 
-        assert_eq!(buffer.line_count(), 1000);
+        assert_eq!(buffer.line_count(), 1001); // 1000 lines + 1 empty line after trailing newline
 
         // Insert in middle of large text
         buffer.insert(2500, "INSERTED");
@@ -816,7 +906,7 @@ mod tests {
         assert!(!buffer.to_string().contains("INSERTED"));
 
         // Verify structure is intact
-        assert_eq!(buffer.line_count(), 1000);
+        assert_eq!(buffer.line_count(), 1001); // Still has trailing newline
     }
 
     #[test]
