@@ -291,15 +291,16 @@ func main() {
         editor.set_language("Rust".to_string());
 
         let available_themes = vec![
-            "Monokai".to_string(),
             "base16-ocean.dark".to_string(),
             "base16-ocean.light".to_string(),
+            "base16-mocha.dark".to_string(),
+            "base16-eighties.dark".to_string(),
             "InspiredGitHub".to_string(),
             "Solarized (dark)".to_string(),
             "Solarized (light)".to_string(),
         ];
 
-        editor.set_theme("Monokai");
+        editor.set_theme("base16-ocean.dark");
 
         Self {
             focus_handle,

@@ -24,7 +24,14 @@ impl SyntaxHighlighter {
     pub fn new() -> Self {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
-        let current_theme = "Monokai".to_string();
+
+        // Get the first available theme as default, or use a fallback
+        let current_theme = theme_set
+            .themes
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| "Default".to_string());
 
         Self {
             inner: Rc::new(RefCell::new(SyntaxHighlighterInner {
@@ -108,8 +115,12 @@ impl SyntaxHighlighter {
             inner.highlight_states.remove(&cache_key);
         }
 
-        // Get or create parse state
-        let syntax = inner.syntax_set.find_syntax_by_name(language).unwrap();
+        // Get or create parse state - we already checked syntax exists above
+        let syntax = inner
+            .syntax_set
+            .find_syntax_by_name(language)
+            .expect("syntax should exist after check above");
+
         let mut parse_state = if line_number == 0 {
             ParseState::new(syntax)
         } else if let Some(state) = inner.parse_states.get(&parse_state_key) {
@@ -118,7 +129,32 @@ impl SyntaxHighlighter {
             ParseState::new(syntax)
         };
 
-        let theme = &inner.theme_set.themes[&inner.current_theme];
+        // Get the theme, with fallback to default colors if theme not found
+        let theme = inner
+            .theme_set
+            .themes
+            .get(&inner.current_theme)
+            .or_else(|| inner.theme_set.themes.values().next());
+
+        if theme.is_none() {
+            // No themes available at all, return plain text
+            return vec![TextRun {
+                len: line.len(),
+                font: Font {
+                    family: font_family,
+                    features: Default::default(),
+                    weight: FontWeight::NORMAL,
+                    style: FontStyle::Normal,
+                    fallbacks: Default::default(),
+                },
+                color: gpui::rgb(0xcccccc).into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }];
+        }
+
+        let theme = theme.expect("theme should exist after check above");
         let highlighter = Highlighter::new(theme);
 
         let ops = parse_state
@@ -214,61 +250,121 @@ impl SyntaxHighlighter {
 
     pub fn get_theme_background(&self) -> Hsla {
         let inner = self.inner.borrow();
-        let theme = &inner.theme_set.themes[&inner.current_theme];
-        if let Some(bg) = theme.settings.background {
-            style_color_to_hsla(bg)
-        } else {
-            gpui::rgb(0x1e1e1e).into()
-        }
+        inner
+            .theme_set
+            .themes
+            .get(&inner.current_theme)
+            .and_then(|theme| theme.settings.background)
+            .map(style_color_to_hsla)
+            .unwrap_or_else(|| gpui::rgb(0x1e1e1e).into())
     }
 
     pub fn get_theme_foreground(&self) -> Hsla {
         let inner = self.inner.borrow();
-        let theme = &inner.theme_set.themes[&inner.current_theme];
-        if let Some(fg) = theme.settings.foreground {
-            style_color_to_hsla(fg)
-        } else {
-            gpui::rgb(0xcccccc).into()
-        }
+        inner
+            .theme_set
+            .themes
+            .get(&inner.current_theme)
+            .and_then(|theme| theme.settings.foreground)
+            .map(style_color_to_hsla)
+            .unwrap_or_else(|| gpui::rgb(0xcccccc).into())
     }
 
     pub fn get_theme_gutter_background(&self) -> Hsla {
         let inner = self.inner.borrow();
-        let theme = &inner.theme_set.themes[&inner.current_theme];
-        if let Some(gutter) = theme.settings.gutter {
-            style_color_to_hsla(gutter)
-        } else if let Some(bg) = theme.settings.background {
-            // Darken background slightly for gutter
-            let mut hsla: Hsla = style_color_to_hsla(bg);
-            hsla.l = (hsla.l * 0.95).max(0.0);
-            hsla
-        } else {
-            gpui::rgb(0x252525).into()
-        }
+        inner
+            .theme_set
+            .themes
+            .get(&inner.current_theme)
+            .and_then(|theme| {
+                theme.settings.gutter.map(style_color_to_hsla).or_else(|| {
+                    theme.settings.background.map(|bg| {
+                        // Darken background slightly for gutter
+                        let mut hsla: Hsla = style_color_to_hsla(bg);
+                        hsla.l = (hsla.l * 0.95).max(0.0);
+                        hsla
+                    })
+                })
+            })
+            .unwrap_or_else(|| gpui::rgb(0x252525).into())
     }
 
     pub fn get_theme_line_highlight(&self) -> Hsla {
         let inner = self.inner.borrow();
-        let theme = &inner.theme_set.themes[&inner.current_theme];
-        if let Some(line_highlight) = theme.settings.line_highlight {
-            let mut hsla = style_color_to_hsla(line_highlight);
-            hsla.a = hsla.a.min(0.3); // Make semi-transparent
-            hsla
-        } else {
-            gpui::rgba(0x2a2a2aff).into()
-        }
+        inner
+            .theme_set
+            .themes
+            .get(&inner.current_theme)
+            .and_then(|theme| theme.settings.line_highlight)
+            .map(|color| {
+                let mut hsla = style_color_to_hsla(color);
+                hsla.a = hsla.a.min(0.3); // Make semi-transparent
+                hsla
+            })
+            .unwrap_or_else(|| gpui::rgba(0x2a2a2aff).into())
     }
 
     pub fn get_theme_selection(&self) -> Hsla {
         let inner = self.inner.borrow();
-        let theme = &inner.theme_set.themes[&inner.current_theme];
-        if let Some(selection) = theme.settings.selection {
-            let mut hsla = style_color_to_hsla(selection);
-            hsla.a = hsla.a.min(0.5); // Make semi-transparent
-            hsla
-        } else {
-            gpui::rgba(0x3e4451aa).into()
+        inner
+            .theme_set
+            .themes
+            .get(&inner.current_theme)
+            .and_then(|theme| theme.settings.selection)
+            .map(|color| {
+                let mut hsla = style_color_to_hsla(color);
+                hsla.a = hsla.a.min(0.5); // Make semi-transparent
+                hsla
+            })
+            .unwrap_or_else(|| gpui::rgba(0x3e4451aa).into())
+    }
+
+    // Load custom themes from a directory
+    // Example: highlighter.load_theme_from_file("./themes/my-theme.tmTheme")
+    #[allow(dead_code)]
+    pub fn load_theme_from_file(&mut self, path: &str) -> Result<(), String> {
+        use std::fs::File;
+        use std::io::BufReader;
+
+        let file = File::open(path).map_err(|e| format!("Failed to open theme file: {}", e))?;
+        let reader = BufReader::new(file);
+
+        let theme = syntect::highlighting::ThemeSet::load_from_reader(&mut BufReader::new(reader))
+            .map_err(|e| format!("Failed to parse theme: {}", e))?;
+
+        let theme_name = std::path::Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("custom")
+            .to_string();
+
+        let mut inner = self.inner.borrow_mut();
+        inner.theme_set.themes.insert(theme_name.clone(), theme);
+        inner.current_theme = theme_name;
+
+        Ok(())
+    }
+
+    // Load custom syntax definitions
+    // Example: highlighter.load_syntax_from_file("./syntaxes/mylang.sublime-syntax")
+    #[allow(dead_code)]
+    pub fn load_syntax_from_file(&mut self, path: &str) -> Result<(), String> {
+        let mut inner = self.inner.borrow_mut();
+        let mut builder = syntect::parsing::SyntaxSetBuilder::new();
+        builder
+            .add_from_folder(path, true)
+            .map_err(|e| format!("Failed to load syntax: {}", e))?;
+
+        // Merge with existing syntaxes
+        for syntax in inner.syntax_set.syntaxes() {
+            builder.add_plain_text_syntax();
         }
+
+        inner.syntax_set = builder.build();
+        inner.parse_states.clear();
+        inner.highlight_states.clear();
+
+        Ok(())
     }
 }
 
@@ -313,3 +409,37 @@ impl Default for SyntaxHighlighter {
         Self::new()
     }
 }
+
+// HOW TO ADD CUSTOM GRAMMARS AND THEMES:
+//
+// 1. THEMES:
+//    Themes use the TextMate .tmTheme format (XML plist files).
+//    You can get themes from:
+//    - https://github.com/textmate/themes
+//    - VSCode themes (extract from .vsix)
+//    - Sublime Text packages
+//
+//    To use a custom theme:
+//    highlighter.load_theme_from_file("./my-theme.tmTheme").ok();
+//
+// 2. SYNTAX DEFINITIONS:
+//    Syntaxes use Sublime Text's .sublime-syntax format (YAML).
+//    You can get syntax definitions from:
+//    - https://github.com/sublimehq/Packages
+//    - Convert TextMate grammars (.tmLanguage) to Sublime syntax
+//
+//    To use custom syntax:
+//    highlighter.load_syntax_from_file("./syntaxes/").ok();
+//
+// 3. BUNDLED SYNTAXES:
+//    Syntect includes these by default:
+//    - Rust, Python, JavaScript, TypeScript, Java, C, C++, C#
+//    - Go, Ruby, PHP, Swift, Kotlin, Scala, Haskell
+//    - HTML, CSS, JSON, XML, YAML, Markdown
+//    - Shell scripts, Dockerfile, SQL, and many more
+//
+// 4. BUNDLED THEMES:
+//    Default themes from syntect include:
+//    - base16-ocean.dark, base16-ocean.light
+//    - base16-mocha.dark, base16-eighties.dark
+//    - InspiredGitHub, Solarized (dark), Solarized (light)
