@@ -1,5 +1,5 @@
+use crate::buffer::{GapBuffer, TextBuffer};
 use crate::syntax_highlighter::SyntaxHighlighter;
-use crate::text_buffer::{SimpleBuffer, TextBuffer};
 use gpui::*;
 
 #[derive(Clone)]
@@ -48,7 +48,7 @@ impl CursorPosition {
 #[derive(Clone)]
 pub struct Editor {
     id: ElementId,
-    buffer: SimpleBuffer,
+    buffer: GapBuffer,
     config: EditorConfig,
     cursor_position: CursorPosition,
     goal_column: Option<usize>,
@@ -71,7 +71,7 @@ impl Editor {
 
         Self {
             id,
-            buffer: SimpleBuffer::new(lines),
+            buffer: GapBuffer::from_lines(lines),
             config: EditorConfig::default(),
             cursor_position: CursorPosition { row: 0, col: 0 },
             goal_column: None,
@@ -118,11 +118,11 @@ impl Editor {
         self.goal_column = None;
     }
 
-    pub fn get_buffer(&self) -> &SimpleBuffer {
+    pub fn get_buffer(&self) -> &GapBuffer {
         &self.buffer
     }
 
-    pub fn get_buffer_mut(&mut self) -> &mut SimpleBuffer {
+    pub fn get_buffer_mut(&mut self) -> &mut GapBuffer {
         &mut self.buffer
     }
 
@@ -150,18 +150,26 @@ impl Editor {
     }
 
     pub fn update_buffer(&mut self, lines: Vec<String>) {
-        self.buffer = SimpleBuffer::new(lines);
+        self.buffer = GapBuffer::from_lines(lines);
         // Reset highlighting state to force complete re-highlighting
         self.syntax_highlighter.reset_state();
     }
 
     /// Update buffer content at a specific line (for future incremental updates)
     pub fn update_line(&mut self, line_index: usize, new_content: String) {
-        // Get all lines, update the specific one, then recreate buffer
-        let mut lines = self.buffer.all_lines();
-        if line_index < lines.len() {
-            lines[line_index] = new_content;
-            self.buffer = SimpleBuffer::new(lines);
+        // Delete the old line and insert the new content
+        if line_index < self.buffer.line_count() {
+            // Get the current line to find its length
+            let line_len = self.buffer.line_len(line_index);
+
+            // Delete the entire line content
+            let start_pos = self.buffer.cursor_to_position(line_index, 0);
+            let end_pos = self.buffer.cursor_to_position(line_index, line_len);
+            self.buffer.delete_range(start_pos, end_pos);
+
+            // Insert the new content
+            self.buffer.insert_at(line_index, 0, &new_content);
+
             // Clear highlighting state from this line onward
             self.syntax_highlighter
                 .clear_state_from_line(line_index, &self.language);
@@ -308,34 +316,14 @@ impl Editor {
 
     pub fn delete_selection(&mut self) -> bool {
         if let Some((start, end)) = self.get_selection_range() {
-            // Get all lines
-            let mut lines = self.buffer.all_lines();
+            // Convert cursor positions to buffer positions
+            let start_pos = self.buffer.cursor_to_position(start.row, start.col);
+            let end_pos = self.buffer.cursor_to_position(end.row, end.col);
 
-            if start.row == end.row {
-                // Selection within a single line
-                let line = &mut lines[start.row];
-                let new_line = format!(
-                    "{}{}",
-                    &line[..start.col.min(line.len())],
-                    &line[end.col.min(line.len())..]
-                );
-                lines[start.row] = new_line;
-            } else {
-                // Selection spans multiple lines
-                let first_line = &lines[start.row];
-                let last_line = &lines[end.row];
-                let new_line = format!(
-                    "{}{}",
-                    &first_line[..start.col.min(first_line.len())],
-                    &last_line[end.col.min(last_line.len())..]
-                );
+            // Delete the range
+            self.buffer.delete_range(start_pos, end_pos);
 
-                // Remove lines in between and replace first line
-                lines.splice(start.row..=end.row, vec![new_line]);
-            }
-
-            // Update buffer and cursor
-            self.buffer = SimpleBuffer::new(lines);
+            // Update cursor position
             self.cursor_position = start;
             self.selection_anchor = None;
             self.goal_column = None;
@@ -352,33 +340,20 @@ impl Editor {
 
     pub fn get_selected_text(&self) -> String {
         if let Some((start, end)) = self.get_selection_range() {
-            let mut selected_text = String::new();
-            let lines = self.buffer.all_lines();
+            // Convert cursor positions to buffer positions
+            let start_pos = self.buffer.cursor_to_position(start.row, start.col);
+            let end_pos = self.buffer.cursor_to_position(end.row, end.col);
 
-            if start.row == end.row {
-                // Selection within single line
-                let line = &lines[start.row];
-                selected_text.push_str(&line[start.col.min(line.len())..end.col.min(line.len())]);
+            // Get the full text and extract the selection
+            let text = self.buffer.to_string();
+
+            // The positions are character indices, so we can slice the chars directly
+            let chars: Vec<char> = text.chars().collect();
+            if start_pos <= chars.len() && end_pos <= chars.len() && start_pos <= end_pos {
+                chars[start_pos..end_pos].iter().collect()
             } else {
-                // Selection spans multiple lines
-                for (i, line) in lines[start.row..=end.row].iter().enumerate() {
-                    let row = start.row + i;
-                    if row == start.row {
-                        // First line: from start.col to end
-                        selected_text.push_str(&line[start.col.min(line.len())..]);
-                        selected_text.push('\n');
-                    } else if row == end.row {
-                        // Last line: from beginning to end.col
-                        selected_text.push_str(&line[..end.col.min(line.len())]);
-                    } else {
-                        // Middle lines: entire line
-                        selected_text.push_str(line);
-                        selected_text.push('\n');
-                    }
-                }
+                String::new()
             }
-
-            selected_text
         } else {
             String::new()
         }
@@ -388,12 +363,12 @@ impl Editor {
         // Delete selection first if there is one
         self.delete_selection();
 
-        let mut lines = self.buffer.all_lines();
-        let line = &mut lines[self.cursor_position.row];
-        let insert_pos = self.cursor_position.col.min(line.len());
-        line.insert(insert_pos, ch);
-
-        self.buffer = SimpleBuffer::new(lines);
+        // Use the buffer's insert_at method directly
+        self.buffer.insert_at(
+            self.cursor_position.row,
+            self.cursor_position.col,
+            &ch.to_string(),
+        );
         self.cursor_position.col += 1;
         self.goal_column = None;
 
@@ -406,53 +381,39 @@ impl Editor {
         // Delete selection first if there is one
         self.delete_selection();
 
-        let mut lines = self.buffer.all_lines();
-        let current_line = lines[self.cursor_position.row].clone();
-        let (before, after) =
-            current_line.split_at(self.cursor_position.col.min(current_line.len()));
-
-        lines[self.cursor_position.row] = before.to_string();
-        lines.insert(self.cursor_position.row + 1, after.to_string());
-
-        self.buffer = SimpleBuffer::new(lines);
+        // Use the buffer's insert_at method directly
+        self.buffer
+            .insert_at(self.cursor_position.row, self.cursor_position.col, "\n");
         self.cursor_position.row += 1;
         self.cursor_position.col = 0;
         self.goal_column = None;
 
         // Clear highlighting state from this line onward
         self.syntax_highlighter
-            .clear_state_from_line(self.cursor_position.row.saturating_sub(1), &self.language);
+            .clear_state_from_line(self.cursor_position.row - 1, &self.language);
     }
 
     pub fn backspace(&mut self) {
-        if self.delete_selection() {
+        // If there's a selection, delete it instead
+        if self.selection_anchor.is_some() {
+            self.delete_selection();
             return;
         }
 
-        if self.cursor_position.col > 0 {
-            // Delete character before cursor
-            let mut lines = self.buffer.all_lines();
-            let line = &mut lines[self.cursor_position.row];
-            if self.cursor_position.col <= line.len() {
-                line.remove(self.cursor_position.col - 1);
-            }
-            self.buffer = SimpleBuffer::new(lines);
-            self.cursor_position.col -= 1;
+        // Use the buffer's backspace_at method directly
+        self.buffer
+            .backspace_at(self.cursor_position.row, self.cursor_position.col);
 
+        if self.cursor_position.col > 0 {
+            self.cursor_position.col -= 1;
             // Clear highlighting state from this line onward
             self.syntax_highlighter
                 .clear_state_from_line(self.cursor_position.row, &self.language);
         } else if self.cursor_position.row > 0 {
-            // Join with previous line
-            let mut lines = self.buffer.all_lines();
-            let current_line = lines.remove(self.cursor_position.row);
-            let prev_line_len = lines[self.cursor_position.row - 1].len();
-            lines[self.cursor_position.row - 1].push_str(&current_line);
-
-            self.buffer = SimpleBuffer::new(lines);
+            // Move to end of previous line
             self.cursor_position.row -= 1;
-            self.cursor_position.col = prev_line_len;
-
+            let line_len = self.buffer.line_len(self.cursor_position.row);
+            self.cursor_position.col = line_len;
             // Clear highlighting state from the previous line onward
             self.syntax_highlighter
                 .clear_state_from_line(self.cursor_position.row, &self.language);
@@ -462,36 +423,19 @@ impl Editor {
     }
 
     pub fn delete(&mut self) {
-        if self.delete_selection() {
+        // If there's a selection, delete it instead
+        if self.selection_anchor.is_some() {
+            self.delete_selection();
             return;
         }
 
-        let lines = self.buffer.all_lines();
-        let current_line_len = self.buffer.line_len(self.cursor_position.row);
+        // Use the buffer's delete_at method directly
+        self.buffer
+            .delete_at(self.cursor_position.row, self.cursor_position.col);
 
-        if self.cursor_position.col < current_line_len {
-            // Delete character at cursor
-            let mut lines = lines;
-            let line = &mut lines[self.cursor_position.row];
-            if self.cursor_position.col < line.len() {
-                line.remove(self.cursor_position.col);
-            }
-            self.buffer = SimpleBuffer::new(lines);
-
-            // Clear highlighting state from this line onward
-            self.syntax_highlighter
-                .clear_state_from_line(self.cursor_position.row, &self.language);
-        } else if self.cursor_position.row < self.buffer.line_count() - 1 {
-            // Join with next line
-            let mut lines = lines;
-            let next_line = lines.remove(self.cursor_position.row + 1);
-            lines[self.cursor_position.row].push_str(&next_line);
-            self.buffer = SimpleBuffer::new(lines);
-
-            // Clear highlighting state from this line onward
-            self.syntax_highlighter
-                .clear_state_from_line(self.cursor_position.row, &self.language);
-        }
+        // Clear highlighting state from this line onward
+        self.syntax_highlighter
+            .clear_state_from_line(self.cursor_position.row, &self.language);
 
         self.goal_column = None;
     }

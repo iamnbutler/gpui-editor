@@ -10,21 +10,20 @@
 //! - **EditorElement**: The GPUI element that renders an Editor
 //! - **EditorView**: A complete view with keyboard handling (see examples)
 
+pub mod buffer;
 pub mod editor;
 pub mod element;
 pub mod syntax_highlighter;
-pub mod text_buffer;
 
 // Internal modules
-mod gap_buffer;
 mod meta_line;
 
 // Re-export main types
+pub use buffer::{GapBuffer, TextBuffer};
 pub use editor::{CursorPosition, Editor, EditorConfig};
 pub use element::EditorElement;
 pub use meta_line::{Language, MetaLine, Selection};
 pub use syntax_highlighter::SyntaxHighlighter;
-pub use text_buffer::{SimpleBuffer, TextBuffer};
 
 // Re-export gpui for convenience
 pub use gpui;
