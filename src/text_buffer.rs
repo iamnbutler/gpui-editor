@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 /// A minimal text buffer trait that supports the features we have so far
 pub trait TextBuffer {
     /// Get the total number of lines in the buffer

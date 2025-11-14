@@ -1,10 +1,6 @@
-use gpui::*;
-use gpui_util::ResultExt;
-
-mod paint;
-
 use crate::syntax_highlighter::SyntaxHighlighter;
 use crate::text_buffer::{SimpleBuffer, TextBuffer};
+use gpui::*;
 
 #[derive(Clone)]
 pub struct EditorConfig {
@@ -37,10 +33,16 @@ impl Default for EditorConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CursorPosition {
     pub row: usize,
     pub col: usize,
+}
+
+impl CursorPosition {
+    pub fn new(row: usize, col: usize) -> Self {
+        Self { row, col }
+    }
 }
 
 #[derive(Clone)]
@@ -59,7 +61,7 @@ pub struct Editor {
 impl Editor {
     pub fn new(id: impl Into<ElementId>, lines: Vec<String>) -> Self {
         let id = id.into();
-        let mut syntax_highlighter = SyntaxHighlighter::new();
+        let syntax_highlighter = SyntaxHighlighter::new();
 
         // Auto-detect language from content
         let full_text = lines.join("\n");
@@ -80,14 +82,24 @@ impl Editor {
         }
     }
 
-    pub fn config(mut self, config: EditorConfig) -> Self {
-        self.config = config;
-        self
+    pub fn id(&self) -> &ElementId {
+        &self.id
     }
 
-    pub fn cursor_position(mut self, position: CursorPosition) -> Self {
-        self.cursor_position = position;
-        self
+    pub fn config(&self) -> &EditorConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut EditorConfig {
+        &mut self.config
+    }
+
+    pub fn set_config(&mut self, config: EditorConfig) {
+        self.config = config;
+    }
+
+    pub fn cursor_position(&self) -> CursorPosition {
+        self.cursor_position
     }
 
     pub fn set_cursor_position(&mut self, position: CursorPosition) {
@@ -110,8 +122,20 @@ impl Editor {
         &self.buffer
     }
 
+    pub fn get_buffer_mut(&mut self) -> &mut SimpleBuffer {
+        &mut self.buffer
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
     pub fn set_language(&mut self, language: String) {
         self.language = language;
+    }
+
+    pub fn current_theme(&self) -> &str {
+        &self.current_theme
     }
 
     pub fn set_theme(&mut self, theme: &str) {
@@ -128,7 +152,6 @@ impl Editor {
     pub fn update_buffer(&mut self, lines: Vec<String>) {
         self.buffer = SimpleBuffer::new(lines);
         // Reset highlighting state to force complete re-highlighting
-        // This is more efficient than recreating the highlighter
         self.syntax_highlighter.reset_state();
     }
 
@@ -145,6 +168,24 @@ impl Editor {
         }
     }
 
+    /// Get syntax highlighting for a line
+    pub fn highlight_line(
+        &mut self,
+        line: &str,
+        line_index: usize,
+        font_family: SharedString,
+        font_size: f32,
+    ) -> Vec<TextRun> {
+        self.syntax_highlighter.highlight_line(
+            line,
+            &self.language,
+            line_index,
+            font_family,
+            font_size,
+        )
+    }
+
+    // Movement methods
     pub fn move_left(&mut self, shift_held: bool) {
         if shift_held && self.selection_anchor.is_none() {
             self.selection_anchor = Some(self.cursor_position);
@@ -298,7 +339,10 @@ impl Editor {
             self.cursor_position = start;
             self.selection_anchor = None;
             self.goal_column = None;
-            self.syntax_highlighter.reset_state();
+
+            // Reset highlighting state from the changed line onward
+            self.syntax_highlighter
+                .clear_state_from_line(start.row, &self.language);
 
             true
         } else {
@@ -306,302 +350,149 @@ impl Editor {
         }
     }
 
-    /// Calculate the y position where a line starts
-    fn y_for_line(&self, line_index: usize, bounds: Bounds<Pixels>) -> Pixels {
-        bounds.origin.y + self.config.line_height * line_index as f32
-    }
+    pub fn get_selected_text(&self) -> String {
+        if let Some((start, end)) = self.get_selection_range() {
+            let mut selected_text = String::new();
+            let lines = self.buffer.all_lines();
 
-    /// Calculate the bounds for a given line (for backgrounds, etc)
-    fn line_bounds(&self, line_index: usize, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-        Bounds {
-            origin: point(
-                bounds.origin.x + self.config.gutter_width,
-                bounds.origin.y + self.config.line_height * line_index as f32,
-            ),
-            size: size(
-                bounds.size.width - self.config.gutter_width,
-                self.config.line_height,
-            ),
-        }
-    }
-
-    /// Calculate the pixel position for the cursor
-    fn cursor_position_px(&self, bounds: Bounds<Pixels>, window: &Window) -> Point<Pixels> {
-        let line_y = self.y_for_line(self.cursor_position.row, bounds);
-        let text_x_start = bounds.origin.x + self.config.gutter_width + self.config.gutter_padding;
-
-        // Calculate x position based on column
-        let mut x_offset = Pixels::ZERO;
-        if let Some(line) = self.buffer.get_line(self.cursor_position.row) {
-            if self.cursor_position.col > 0 {
-                let text_before_cursor = SharedString::from(
-                    line[..self.cursor_position.col.min(line.len())].to_string(),
-                );
-                let shaped = window.text_system().shape_line(
-                    text_before_cursor.clone(),
-                    self.config.font_size,
-                    &[TextRun {
-                        len: text_before_cursor.len(),
-                        font: Font {
-                            family: self.config.font_family.clone(),
-                            features: Default::default(),
-                            weight: FontWeight::NORMAL,
-                            style: FontStyle::Normal,
-                            fallbacks: Default::default(),
-                        },
-                        color: self.config.text_color.into(),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    }],
-                    None,
-                );
-                x_offset = shaped.width;
-            }
-        }
-
-        point(text_x_start + x_offset, line_y)
-    }
-
-    /// Convert a pixel position to a cursor position
-    pub fn position_to_cursor(
-        &self,
-        position: Point<Pixels>,
-        bounds: Bounds<Pixels>,
-        window: &Window,
-    ) -> CursorPosition {
-        // Check if click is in gutter
-        if position.x < bounds.origin.x + self.config.gutter_width {
-            // Clicking gutter selects whole line
-            let line_index =
-                ((position.y - bounds.origin.y) / self.config.line_height).floor() as usize;
-            let line_index = line_index.min(self.buffer.line_count().saturating_sub(1));
-            return CursorPosition {
-                row: line_index,
-                col: 0, // For now, just position at start of line
-            };
-        }
-
-        // Calculate which line was clicked
-        let line_index =
-            ((position.y - bounds.origin.y) / self.config.line_height).floor() as usize;
-        let line_index = line_index.min(self.buffer.line_count().saturating_sub(1));
-
-        // Calculate which column was clicked
-        let text_x_start = bounds.origin.x + self.config.gutter_width + self.config.gutter_padding;
-        let relative_x = (position.x - text_x_start).max(px(0.0));
-
-        // Get the line content
-        let col = if let Some(line) = self.buffer.get_line(line_index) {
-            if line.is_empty() {
-                0
+            if start.row == end.row {
+                // Selection within single line
+                let line = &lines[start.row];
+                selected_text.push_str(&line[start.col.min(line.len())..end.col.min(line.len())]);
             } else {
-                // Binary search to find the column
-                let mut left = 0;
-                let mut right = line.len();
-                let mut best_col = 0;
-                let mut best_distance = px(999999.0);
-
-                while left <= right {
-                    let mid = (left + right) / 2;
-
-                    // Measure width up to this column
-                    let text_before = SharedString::from(line[..mid].to_string());
-                    let shaped = window.text_system().shape_line(
-                        text_before.clone(),
-                        self.config.font_size,
-                        &[TextRun {
-                            len: text_before.len(),
-                            font: Font {
-                                family: self.config.font_family.clone(),
-                                features: Default::default(),
-                                weight: FontWeight::NORMAL,
-                                style: FontStyle::Normal,
-                                fallbacks: Default::default(),
-                            },
-                            color: self.config.text_color.into(),
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        }],
-                        None,
-                    );
-
-                    let width = shaped.width;
-                    let distance = (width - relative_x).abs();
-
-                    if distance < best_distance {
-                        best_distance = distance;
-                        best_col = mid;
-                    }
-
-                    if width < relative_x {
-                        left = mid + 1;
-                    } else if width > relative_x && mid > 0 {
-                        right = mid - 1;
+                // Selection spans multiple lines
+                for (i, line) in lines[start.row..=end.row].iter().enumerate() {
+                    let row = start.row + i;
+                    if row == start.row {
+                        // First line: from start.col to end
+                        selected_text.push_str(&line[start.col.min(line.len())..]);
+                        selected_text.push('\n');
+                    } else if row == end.row {
+                        // Last line: from beginning to end.col
+                        selected_text.push_str(&line[..end.col.min(line.len())]);
                     } else {
-                        break;
+                        // Middle lines: entire line
+                        selected_text.push_str(line);
+                        selected_text.push('\n');
                     }
-                }
-
-                // Check if we should position after the last character
-                if best_col < line.len() && relative_x > px(0.0) {
-                    // Measure the full width including the next character
-                    let text_with_next = SharedString::from(line[..best_col + 1].to_string());
-                    let shaped_with_next = window.text_system().shape_line(
-                        text_with_next.clone(),
-                        self.config.font_size,
-                        &[TextRun {
-                            len: text_with_next.len(),
-                            font: Font {
-                                family: self.config.font_family.clone(),
-                                features: Default::default(),
-                                weight: FontWeight::NORMAL,
-                                style: FontStyle::Normal,
-                                fallbacks: Default::default(),
-                            },
-                            color: self.config.text_color.into(),
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        }],
-                        None,
-                    );
-
-                    let text_without_next = if best_col > 0 {
-                        SharedString::from(line[..best_col].to_string())
-                    } else {
-                        SharedString::from("")
-                    };
-
-                    let shaped_without_next = window.text_system().shape_line(
-                        text_without_next.clone(),
-                        self.config.font_size,
-                        &[TextRun {
-                            len: text_without_next.len(),
-                            font: Font {
-                                family: self.config.font_family.clone(),
-                                features: Default::default(),
-                                weight: FontWeight::NORMAL,
-                                style: FontStyle::Normal,
-                                fallbacks: Default::default(),
-                            },
-                            color: self.config.text_color.into(),
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        }],
-                        None,
-                    );
-
-                    let width_before = shaped_without_next.width;
-                    let width_after = shaped_with_next.width;
-                    let midpoint = (width_before + width_after) / 2.0;
-
-                    if relative_x > midpoint {
-                        best_col + 1
-                    } else {
-                        best_col
-                    }
-                } else {
-                    best_col
                 }
             }
+
+            selected_text
         } else {
-            0
-        };
-
-        // Clamp column to line length
-        let col = col.min(self.buffer.line_len(line_index));
-
-        CursorPosition {
-            row: line_index,
-            col,
+            String::new()
         }
     }
-}
 
-impl gpui::Element for Editor {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
+    pub fn insert_char(&mut self, ch: char) {
+        // Delete selection first if there is one
+        self.delete_selection();
 
-    fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
+        let mut lines = self.buffer.all_lines();
+        let line = &mut lines[self.cursor_position.row];
+        let insert_pos = self.cursor_position.col.min(line.len());
+        line.insert(insert_pos, ch);
+
+        self.buffer = SimpleBuffer::new(lines);
+        self.cursor_position.col += 1;
+        self.goal_column = None;
+
+        // Clear highlighting state from this line onward
+        self.syntax_highlighter
+            .clear_state_from_line(self.cursor_position.row, &self.language);
     }
 
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
+    pub fn insert_newline(&mut self) {
+        // Delete selection first if there is one
+        self.delete_selection();
+
+        let mut lines = self.buffer.all_lines();
+        let current_line = lines[self.cursor_position.row].clone();
+        let (before, after) =
+            current_line.split_at(self.cursor_position.col.min(current_line.len()));
+
+        lines[self.cursor_position.row] = before.to_string();
+        lines.insert(self.cursor_position.row + 1, after.to_string());
+
+        self.buffer = SimpleBuffer::new(lines);
+        self.cursor_position.row += 1;
+        self.cursor_position.col = 0;
+        self.goal_column = None;
+
+        // Clear highlighting state from this line onward
+        self.syntax_highlighter
+            .clear_state_from_line(self.cursor_position.row.saturating_sub(1), &self.language);
     }
 
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.0).into();
-        style.size.height = relative(1.0).into();
+    pub fn backspace(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
 
-        let layout_id = window.request_layout(style, None, cx);
-        (layout_id, ())
+        if self.cursor_position.col > 0 {
+            // Delete character before cursor
+            let mut lines = self.buffer.all_lines();
+            let line = &mut lines[self.cursor_position.row];
+            if self.cursor_position.col <= line.len() {
+                line.remove(self.cursor_position.col - 1);
+            }
+            self.buffer = SimpleBuffer::new(lines);
+            self.cursor_position.col -= 1;
+
+            // Clear highlighting state from this line onward
+            self.syntax_highlighter
+                .clear_state_from_line(self.cursor_position.row, &self.language);
+        } else if self.cursor_position.row > 0 {
+            // Join with previous line
+            let mut lines = self.buffer.all_lines();
+            let current_line = lines.remove(self.cursor_position.row);
+            let prev_line_len = lines[self.cursor_position.row - 1].len();
+            lines[self.cursor_position.row - 1].push_str(&current_line);
+
+            self.buffer = SimpleBuffer::new(lines);
+            self.cursor_position.row -= 1;
+            self.cursor_position.col = prev_line_len;
+
+            // Clear highlighting state from the previous line onward
+            self.syntax_highlighter
+                .clear_state_from_line(self.cursor_position.row, &self.language);
+        }
+
+        self.goal_column = None;
     }
 
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        _bounds: Bounds<Pixels>,
-        _request_layout_state: &mut Self::RequestLayoutState,
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> Self::PrepaintState {
-        ()
-    }
+    pub fn delete(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
 
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout_state: &mut Self::RequestLayoutState,
-        _prepaint_state: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let line_height = self.config.line_height;
-        let font_size = self.config.font_size;
-        let gutter_width = self.config.gutter_width;
-        let gutter_padding = self.config.gutter_padding;
-        let text_color = self.config.text_color;
-        let line_number_color = self.config.line_number_color;
-        let gutter_bg_color = self.config.gutter_bg_color;
-        let editor_bg_color = self.config.editor_bg_color;
-        let active_line_bg_color = self.config.active_line_bg_color;
+        let lines = self.buffer.all_lines();
+        let current_line_len = self.buffer.line_len(self.cursor_position.row);
 
-        // background
-        self.paint_gutter_background(window, bounds);
-        self.paint_editor_background(window, bounds);
+        if self.cursor_position.col < current_line_len {
+            // Delete character at cursor
+            let mut lines = lines;
+            let line = &mut lines[self.cursor_position.row];
+            if self.cursor_position.col < line.len() {
+                line.remove(self.cursor_position.col);
+            }
+            self.buffer = SimpleBuffer::new(lines);
 
-        // underlay
-        self.paint_active_line_background(window, bounds);
+            // Clear highlighting state from this line onward
+            self.syntax_highlighter
+                .clear_state_from_line(self.cursor_position.row, &self.language);
+        } else if self.cursor_position.row < self.buffer.line_count() - 1 {
+            // Join with next line
+            let mut lines = lines;
+            let next_line = lines.remove(self.cursor_position.row + 1);
+            lines[self.cursor_position.row].push_str(&next_line);
+            self.buffer = SimpleBuffer::new(lines);
 
-        // selection
-        self.paint_selection(window, bounds);
+            // Clear highlighting state from this line onward
+            self.syntax_highlighter
+                .clear_state_from_line(self.cursor_position.row, &self.language);
+        }
 
-        // content
-        self.paint_lines(cx, window, bounds);
-
-        // overlay
-        self.paint_cursor(window, bounds);
-    }
-}
-
-impl IntoElement for Editor {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
+        self.goal_column = None;
     }
 }

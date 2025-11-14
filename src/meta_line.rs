@@ -48,7 +48,7 @@ impl MetaLine {
 }
 
 impl RenderOnce for MetaLine {
-    fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
+    fn render(self, _window: &mut gpui::Window, _cx: &mut gpui::App) -> impl gpui::IntoElement {
         div()
             .absolute()
             .right(px(0.0))

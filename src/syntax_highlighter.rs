@@ -2,10 +2,8 @@ use gpui::{Font, FontStyle, FontWeight, Hsla, SharedString, TextRun};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use syntect::highlighting::{
-    HighlightIterator, HighlightState, Highlighter, Style, Theme, ThemeSet,
-};
-use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
+use syntect::highlighting::{HighlightIterator, HighlightState, Highlighter, Style, ThemeSet};
+use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
 
 struct SyntaxHighlighterInner {
     syntax_set: SyntaxSet,
