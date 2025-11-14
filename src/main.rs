@@ -5,8 +5,11 @@ use std::ops::Range as StdRange;
 
 mod editor;
 mod gap_buffer;
+mod meta_line;
+use meta_line::{Language, MetaLine, Selection};
 mod syntax_highlighter;
 mod text_buffer;
+
 use editor::{CursorPosition, Editor, EditorConfig};
 use gap_buffer::GapBuffer;
 use text_buffer::{SimpleBuffer, TextBuffer};
@@ -788,10 +791,34 @@ impl EntityInputHandler for EditorView {
 }
 
 impl Render for EditorView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Don't recreate editor on every render - it's already up to date
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let current_theme = &self.available_themes[self.current_theme_index];
         let (current_language, _, _) = &self.available_languages[self.current_language_index];
+
+        // Convert the current language string to the Language enum
+        let language = if current_language == "Rust" {
+            Language::Rust
+        } else {
+            Language::PlainText
+        };
+
+        // Calculate selection if there is one
+        let selection = if self.editor.has_selection() {
+            if let Some((start, end)) = self.editor.get_selection_range() {
+                let selected_text = self.get_selected_text(start, end);
+                Some(Selection {
+                    lines: 0, // We could calculate lines if needed
+                    chars: selected_text.len(),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Convert CursorPosition to Point<usize>
+        let cursor_position = Point::new(self.cursor_position.col, self.cursor_position.row);
 
         div()
             .size_full()
@@ -826,52 +853,7 @@ impl Render for EditorView {
                         editor_element: self.editor.clone(),
                     }),
             )
-            .child(
-                // Status bar
-                div()
-                    .h(px(24.0))
-                    .w_full()
-                    .bg(rgb(0x2b2b2b))
-                    .border_t_1()
-                    .border_color(rgb(0x3c3c3c))
-                    .flex()
-                    .items_center()
-                    .px_3()
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .text_sm()
-                            .text_color(rgb(0xaaaaaa))
-                            .child(SharedString::from(format!("Theme: {}", current_theme)))
-                            .child(SharedString::from(" | "))
-                            .child(SharedString::from(format!(
-                                "Language: {}",
-                                current_language
-                            )))
-                            .child(SharedString::from(" | "))
-                            .child(SharedString::from(format!(
-                                "Ln {}, Col {}",
-                                self.cursor_position.row + 1,
-                                self.cursor_position.col + 1
-                            )))
-                            .child(SharedString::from(" | "))
-                            .child(if self.editor.has_selection() {
-                                if let Some((start, end)) = self.editor.get_selection_range() {
-                                    let selected_text = self.get_selected_text(start, end);
-                                    SharedString::from(format!(" | {} chars selected", selected_text.len()))
-                                } else {
-                                    SharedString::from("")
-                                }
-                            } else {
-                                SharedString::from("")
-                            })
-                            .child(SharedString::from(" | "))
-                            .child(SharedString::from(
-                                "Cmd+A: Select All | Cmd+C/X/V: Copy/Cut/Paste | Esc: Clear Selection",
-                            )),
-                    ),
-            )
+            .child(MetaLine::new(cursor_position, language, selection))
     }
 }
 
@@ -901,24 +883,24 @@ fn main() {
             KeyBinding::new("cmd-shift-l", PreviousLanguage, None),
         ]);
 
-        cx.open_window(
-            WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Editor Element".into()),
+        let app_window = cx
+            .open_window(
+                WindowOptions {
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Editor Element".into()),
+                        ..Default::default()
+                    }),
+                    focus: true,
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-            |window, cx| {
-                let view = cx.new(|cx| EditorView::new(cx));
-                let handle = cx.focus_handle();
-                window.focus(&handle);
-                view
-            },
-        )
-        .unwrap();
+                },
+                |window, cx| {
+                    let view = cx.new(|cx| EditorView::new(cx));
+                    view
+                },
+            )
+            .unwrap();
 
-        cx.activate(false);
+        cx.activate(true);
     });
 }
 
