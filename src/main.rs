@@ -422,26 +422,21 @@ func main() {
                 "Cutting selection from ({},{}) to ({},{})",
                 start.row, start.col, end.row, end.col
             );
-            // Get the selected text to copy to clipboard
             let text = self.get_selected_text(start, end);
             println!("Cutting text: {:?}", text);
             cx.write_to_clipboard(ClipboardItem::new_string(text));
 
-            // Delete the selection from editor
             self.editor.delete_selection();
             self.cursor_position = self.editor.get_cursor_position();
 
-            // Sync the gap buffer with the editor's buffer
             let lines = self.editor.get_buffer().all_lines();
             self.buffer = GapBuffer::from_lines(lines);
 
-            // Update the editor content to refresh syntax highlighting
             self.update_editor_content();
             cx.notify();
             println!("Selection cut and removed");
         } else {
             println!("No selection - cutting current line");
-            // No selection - cut the entire current line
             let current_line = self.cursor_position.row;
             let lines = self.buffer.all_lines();
             let line_text = if current_line < lines.len() {
@@ -451,10 +446,8 @@ func main() {
             };
             println!("Cutting line {}: {:?}", current_line, line_text);
 
-            // Copy line to clipboard
             cx.write_to_clipboard(ClipboardItem::new_string(line_text));
 
-            // Delete the line
             let mut lines = self.buffer.all_lines();
             if current_line < lines.len() {
                 lines.remove(current_line);
@@ -462,16 +455,13 @@ func main() {
                     lines.push(String::new());
                 }
 
-                // Update buffer
                 self.buffer = GapBuffer::from_lines(lines.clone());
 
-                // Update cursor position
                 if self.cursor_position.row >= lines.len() && lines.len() > 0 {
                     self.cursor_position.row = lines.len() - 1;
                 }
                 self.cursor_position.col = 0;
 
-                // Update editor
                 self.editor.update_buffer(lines);
                 self.editor.set_cursor_position(self.cursor_position);
                 cx.notify();
@@ -501,11 +491,9 @@ func main() {
         let lines = self.buffer.all_lines();
 
         if start.row == end.row {
-            // Selection within single line
             let line = &lines[start.row];
             line[start.col.min(line.len())..end.col.min(line.len())].to_string()
         } else {
-            // Multi-line selection
             let mut result = String::new();
 
             // First line
@@ -528,7 +516,6 @@ func main() {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        // First check if there's a selection to delete
         if self.editor.has_selection() {
             self.editor.delete_selection();
             self.cursor_position = self.editor.get_cursor_position();
@@ -552,13 +539,11 @@ func main() {
             self.cursor_position.col = self.buffer.line_len(self.cursor_position.row);
         }
 
-        // Update editor content
         self.update_editor_content();
         cx.notify();
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
-        // First check if there's a selection to delete
         if self.editor.has_selection() {
             self.editor.delete_selection();
             self.cursor_position = self.editor.get_cursor_position();
@@ -574,23 +559,19 @@ func main() {
         self.buffer.move_gap_to(pos);
         self.buffer.delete_forward();
 
-        // Update editor content
         self.update_editor_content();
         cx.notify();
     }
 
     fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
         self.insert_text("\n", cx);
-        // cursor position is already updated by insert_text
         cx.notify();
     }
 
     fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        // First check if there's a selection to delete
         if self.editor.has_selection() {
             self.editor.delete_selection();
             self.cursor_position = self.editor.get_cursor_position();
-            // Update buffer from editor after deletion
             let lines = self.editor.get_buffer().all_lines();
             self.buffer = GapBuffer::from_lines(lines);
         }
@@ -659,11 +640,9 @@ func main() {
         }
         let (name, ext, sample_code) = &self.available_languages[self.current_language_index];
 
-        // Replace buffer with new sample code
         self.buffer = GapBuffer::from_text(sample_code);
         self.cursor_position = CursorPosition { row: 0, col: 0 };
 
-        // Update editor with new language
         self.editor.update_buffer(self.buffer.all_lines());
         self.editor.set_language(name.clone());
         self.editor.set_cursor_position(self.cursor_position);
@@ -672,7 +651,6 @@ func main() {
     }
 
     fn update_editor_content(&mut self) {
-        // Update the editor's buffer without recreating it
         self.editor.update_buffer(self.buffer.all_lines());
         self.editor.set_cursor_position(self.cursor_position);
     }
@@ -795,19 +773,17 @@ impl Render for EditorView {
         let current_theme = &self.available_themes[self.current_theme_index];
         let (current_language, _, _) = &self.available_languages[self.current_language_index];
 
-        // Convert the current language string to the Language enum
         let language = if current_language == "Rust" {
             Language::Rust
         } else {
             Language::PlainText
         };
 
-        // Calculate selection if there is one
         let selection = if self.editor.has_selection() {
             if let Some((start, end)) = self.editor.get_selection_range() {
                 let selected_text = self.get_selected_text(start, end);
                 Some(Selection {
-                    lines: 0, // We could calculate lines if needed
+                    lines: 0,
                     chars: selected_text.len(),
                 })
             } else {
@@ -817,7 +793,6 @@ impl Render for EditorView {
             None
         };
 
-        // Convert CursorPosition to Point<usize>
         let cursor_position = Point::new(self.cursor_position.col, self.cursor_position.row);
 
         div()
@@ -963,7 +938,6 @@ impl Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        // Paint the editor element first
         self.editor_element.paint(
             id,
             inspector_id,
@@ -974,7 +948,6 @@ impl Element for EditorElement {
             cx,
         );
 
-        // Handle mouse events
         let entity = self.entity.clone();
 
         window.on_mouse_event::<MouseDownEvent>(move |mouse_down, phase, window, cx| {
@@ -984,7 +957,6 @@ impl Element for EditorElement {
 
             if bounds.contains(&mouse_down.position) {
                 entity.update(cx, |view, cx| {
-                    // Use the view's editor to calculate cursor position
                     let new_cursor =
                         view.editor
                             .position_to_cursor(mouse_down.position, bounds, window);
@@ -992,17 +964,14 @@ impl Element for EditorElement {
                     view.cursor_position = new_cursor;
                     view.editor.set_cursor_position(new_cursor);
 
-                    // Clear selection when clicking (TODO: check shift modifier later)
                     view.editor.clear_selection();
 
-                    // Focus the editor when clicked
                     window.focus(&view.focus_handle);
                     cx.notify();
                 });
             }
         });
 
-        // Handle input if focused
         self.entity.read_with(cx, |view, _| {
             if view.focus_handle.is_focused(window) {
                 let input_handler = ElementInputHandler::new(bounds, self.entity.clone());

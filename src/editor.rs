@@ -49,6 +49,7 @@ pub struct Editor {
     buffer: SimpleBuffer,
     config: EditorConfig,
     cursor_position: CursorPosition,
+    goal_column: Option<usize>,
     selection_anchor: Option<CursorPosition>,
     syntax_highlighter: SyntaxHighlighter,
     language: String,
@@ -71,6 +72,7 @@ impl Editor {
             buffer: SimpleBuffer::new(lines),
             config: EditorConfig::default(),
             cursor_position: CursorPosition { row: 0, col: 0 },
+            goal_column: None,
             selection_anchor: None,
             syntax_highlighter,
             language,
@@ -90,6 +92,8 @@ impl Editor {
 
     pub fn set_cursor_position(&mut self, position: CursorPosition) {
         self.cursor_position = position;
+        // Reset goal column when cursor position is explicitly set
+        self.goal_column = None;
     }
 
     pub fn get_cursor_position(&self) -> CursorPosition {
@@ -98,6 +102,8 @@ impl Editor {
 
     pub fn clear_selection(&mut self) {
         self.selection_anchor = None;
+        // Reset goal column when clearing selection
+        self.goal_column = None;
     }
 
     pub fn get_buffer(&self) -> &SimpleBuffer {
@@ -146,10 +152,12 @@ impl Editor {
             self.selection_anchor = None;
         }
 
+        // Reset goal column when moving horizontally
+        self.goal_column = None;
+
         if self.cursor_position.col > 0 {
             self.cursor_position.col -= 1;
         } else if self.cursor_position.row > 0 {
-            // Move to end of previous line
             self.cursor_position.row -= 1;
             self.cursor_position.col = self.buffer.line_len(self.cursor_position.row);
         }
@@ -161,6 +169,9 @@ impl Editor {
         } else if !shift_held {
             self.selection_anchor = None;
         }
+
+        // Reset goal column when moving horizontally
+        self.goal_column = None;
 
         let current_line_len = self.buffer.line_len(self.cursor_position.row);
 
@@ -181,10 +192,19 @@ impl Editor {
         }
 
         if self.cursor_position.row > 0 {
+            // Set goal column if not already set
+            if self.goal_column.is_none() {
+                self.goal_column = Some(self.cursor_position.col);
+            }
+
             self.cursor_position.row -= 1;
-            // Clamp column to line length
+
+            // Try to use goal column, but clamp to line length
             let line_len = self.buffer.line_len(self.cursor_position.row);
-            self.cursor_position.col = self.cursor_position.col.min(line_len);
+            self.cursor_position.col = self
+                .goal_column
+                .unwrap_or(self.cursor_position.col)
+                .min(line_len);
         }
     }
 
@@ -196,14 +216,26 @@ impl Editor {
         }
 
         if self.cursor_position.row < self.buffer.line_count().saturating_sub(1) {
+            // Set goal column if not already set
+            if self.goal_column.is_none() {
+                self.goal_column = Some(self.cursor_position.col);
+            }
+
             self.cursor_position.row += 1;
-            // Clamp column to line length
+
+            // Try to use goal column, but clamp to line length
             let line_len = self.buffer.line_len(self.cursor_position.row);
-            self.cursor_position.col = self.cursor_position.col.min(line_len);
+            self.cursor_position.col = self
+                .goal_column
+                .unwrap_or(self.cursor_position.col)
+                .min(line_len);
         }
     }
 
     pub fn select_all(&mut self) {
+        // Reset goal column when selecting all
+        self.goal_column = None;
+
         // Set anchor at beginning
         self.selection_anchor = Some(CursorPosition { row: 0, col: 0 });
 
@@ -265,6 +297,7 @@ impl Editor {
             self.buffer = SimpleBuffer::new(lines);
             self.cursor_position = start;
             self.selection_anchor = None;
+            self.goal_column = None;
             self.syntax_highlighter.reset_state();
 
             true
